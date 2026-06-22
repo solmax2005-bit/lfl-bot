@@ -2,7 +2,7 @@ import os
 from telegram import Update
 from telegram.ext import ContextTypes
 from database.db import init_db
-from database.queries import get_agents_by_position, deactivate_agent, get_agent_by_tg_id
+from database.queries import get_agents_by_position, deactivate_agent
 
 DB_PATH = os.getenv("DB_PATH", "lfl_bot.db")
 ADMIN_TG_ID = int(os.getenv("ADMIN_TG_ID", "0"))
