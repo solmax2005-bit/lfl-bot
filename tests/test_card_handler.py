@@ -60,3 +60,41 @@ async def test_card_handler_invalid_url_shows_error():
     # Last reply_text call should contain the error message
     last_call_text = update.message.reply_text.call_args[0][0]
     assert "не удалось" in last_call_text.lower()
+
+
+@pytest.mark.asyncio
+async def test_mycard_no_profile_prompts_usage():
+    from handlers.card import mycard_handler
+    update = MagicMock()
+    context = MagicMock()
+    update.effective_user.id = 9999
+    update.message.reply_text = AsyncMock()
+
+    with patch("handlers.card.init_db", AsyncMock()), \
+         patch("handlers.card.get_agent_by_tg_id", AsyncMock(return_value=None)):
+        await mycard_handler(update, context)
+
+    update.message.reply_text.assert_called_once()
+    assert "привяжи" in update.message.reply_text.call_args[0][0].lower() or \
+           "card" in update.message.reply_text.call_args[0][0].lower()
+
+
+@pytest.mark.asyncio
+async def test_mycard_with_linked_profile_sends_card():
+    from handlers.card import mycard_handler
+    update = MagicMock()
+    context = MagicMock()
+    update.effective_user.id = 1001
+    update.message.reply_text = AsyncMock()
+    update.message.reply_photo = AsyncMock()
+
+    agent_row = {"tg_id": 1001, "lfl_url": "https://ug.lfl.ru/player1", "name": "X"}
+
+    with patch("handlers.card.init_db", AsyncMock()), \
+         patch("handlers.card.get_agent_by_tg_id", AsyncMock(return_value=agent_row)), \
+         patch("handlers.card.link_profile", AsyncMock()), \
+         patch("handlers.card.parse_player", AsyncMock(return_value=_make_profile())), \
+         patch("handlers.card.draw_card", return_value=b"PNGBYTES"):
+        await mycard_handler(update, context)
+
+    update.message.reply_photo.assert_called_once()

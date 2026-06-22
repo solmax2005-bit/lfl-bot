@@ -4,7 +4,7 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters,
 )
-from handlers.card import start_handler, help_handler, card_handler, message_url_handler
+from handlers.card import start_handler, help_handler, card_handler, message_url_handler, mycard_handler
 from handlers.search import (
     build_free_conversation, find_handler,
     find_position_callback, leave_handler,
@@ -26,6 +26,7 @@ def main() -> None:
     app.add_handler(CommandHandler("start", start_handler))
     app.add_handler(CommandHandler("help", help_handler))
     app.add_handler(CommandHandler("card", card_handler))
+    app.add_handler(CommandHandler("mycard", mycard_handler))
     app.add_handler(CommandHandler("find", find_handler))
     app.add_handler(CommandHandler("leave", leave_handler))
     app.add_handler(CommandHandler("admin_list", admin_list_handler))
