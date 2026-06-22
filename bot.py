@@ -1,8 +1,8 @@
 import os
 from dotenv import load_dotenv
-from telegram.ext import Application, CommandHandler
+from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
-from handlers.card import start_handler, help_handler, card_handler
+from handlers.card import start_handler, help_handler, card_handler, message_url_handler
 from handlers.search import free_handler, find_handler
 from handlers.admin import admin_list_handler
 
@@ -17,6 +17,7 @@ def main() -> None:
     app.add_handler(CommandHandler("free", free_handler))
     app.add_handler(CommandHandler("find", find_handler))
     app.add_handler(CommandHandler("admin_list", admin_list_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_url_handler))
     app.run_polling()
 
 if __name__ == "__main__":
