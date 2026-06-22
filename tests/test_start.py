@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 @pytest.mark.asyncio
 async def test_start_handler_sends_welcome():
-    from handlers.card import start_handler  # will import after step 8
+    from handlers.card import start_handler
     update = MagicMock()
     context = MagicMock()
     update.effective_user.first_name = "Иван"

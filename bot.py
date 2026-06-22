@@ -1,5 +1,7 @@
-import os
 from dotenv import load_dotenv
+load_dotenv()
+
+import os
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters,
@@ -11,8 +13,6 @@ from handlers.search import (
 )
 from handlers.admin import admin_list_handler, admin_deactivate_handler
 from database.db import init_db
-
-load_dotenv()
 
 
 async def post_init(app):

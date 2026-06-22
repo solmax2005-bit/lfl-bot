@@ -1,4 +1,5 @@
 import os
+import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ContextTypes, ConversationHandler, CommandHandler,
@@ -6,6 +7,8 @@ from telegram.ext import (
 )
 from database.db import init_db
 from database.queries import upsert_agent, get_agents_by_position, deactivate_agent
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = os.getenv("DB_PATH", "lfl_bot.db")
 
@@ -136,8 +139,8 @@ async def find_position_callback(update: Update, context: ContextTypes.DEFAULT_T
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(keyboard),
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Failed to send agent card: %s", exc)
 
 
 def build_free_conversation() -> ConversationHandler:
