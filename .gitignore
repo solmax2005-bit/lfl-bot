@@ -1,8 +1,9 @@
+.env
+lfl_bot.db
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
-.env
 .venv/
 venv/
 *.egg-info/
