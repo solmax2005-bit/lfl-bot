@@ -124,13 +124,17 @@ async def find_position_callback(update: Update, context: ContextTypes.DEFAULT_T
             f"⚽ {agent['position']} | 🏆 {agent['division']}\n"
             f"💬 {agent.get('comment') or '—'}"
         )
-        keyboard = [[InlineKeyboardButton("Написать", url=f"https://t.me/{contact.lstrip('@')}")]]
+        if contact.startswith("@"):
+            contact_url = f"https://t.me/{contact.lstrip('@')}"
+        else:
+            contact_url = f"tel:{contact}"
+        keyboard = [[InlineKeyboardButton("Написать", url=contact_url)]]
         try:
             await context.bot.send_message(
                 chat_id=query.message.chat_id,
                 text=text,
                 parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(keyboard) if contact.startswith("@") else None,
+                reply_markup=InlineKeyboardMarkup(keyboard),
             )
         except Exception:
             pass
