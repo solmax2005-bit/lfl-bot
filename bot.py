@@ -9,7 +9,7 @@ from handlers.search import (
     build_free_conversation, find_handler,
     find_position_callback, leave_handler,
 )
-from handlers.admin import admin_list_handler
+from handlers.admin import admin_list_handler, admin_deactivate_handler
 from database.db import init_db
 
 load_dotenv()
@@ -30,6 +30,7 @@ def main() -> None:
     app.add_handler(CommandHandler("find", find_handler))
     app.add_handler(CommandHandler("leave", leave_handler))
     app.add_handler(CommandHandler("admin_list", admin_list_handler))
+    app.add_handler(CommandHandler("admin_clear", admin_deactivate_handler))
     app.add_handler(build_free_conversation())
     app.add_handler(CallbackQueryHandler(find_position_callback, pattern=r"^find:"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_url_handler))
