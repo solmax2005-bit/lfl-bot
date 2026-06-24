@@ -18,6 +18,7 @@ from telegram.ext import (
 from handlers.card import (
     start_handler, help_handler, mycard_handler,
     message_url_handler, delete_card_callback,
+    build_multi_card_conversation, multi_done_callback,
 )
 from handlers.search import (
     build_free_conversation, find_handler,
@@ -54,6 +55,7 @@ def main() -> None:
     # Conversations
     app.add_handler(build_free_conversation())
     app.add_handler(build_team_conversation())
+    app.add_handler(build_multi_card_conversation())
 
     # Callback queries
     app.add_handler(CallbackQueryHandler(find_position_callback, pattern=r"^find:"))
@@ -62,6 +64,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(delete_card_callback,   pattern=r"^delete_card$"))
     # edit_team is handled inside build_team_conversation() entry_points (see teams.py)
     app.add_handler(CallbackQueryHandler(delete_team_callback,   pattern=r"^delete_team$"))
+    app.add_handler(CallbackQueryHandler(multi_done_callback,    pattern=r"^multi_done$"))
 
     # Admin
     app.add_handler(CommandHandler("admin_list",  admin_list_handler))
