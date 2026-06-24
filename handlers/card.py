@@ -103,14 +103,28 @@ async def _process_url(update: Update, url: str, context: ContextTypes.DEFAULT_T
     )
 
 
+_SKIP_KB = InlineKeyboardMarkup([[
+    InlineKeyboardButton("Пропустить ➡️", callback_data="add_league_skip"),
+]])
+
+
 async def add_league_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     await query.message.reply_text(
-        "Пришли ссылку из другой лиги (lfl.ru, afl.ru, f-league.ru).\n"
-        "Или /skip чтобы пропустить."
+        "Пришли ссылку из другой лиги (lfl.ru, afl.ru, f-league.ru).",
+        reply_markup=_SKIP_KB,
     )
     return AWAITING_EXTRA_URL
+
+
+async def add_league_skip_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_reply_markup(reply_markup=None)
+    context.user_data.pop("multi_profile", None)
+    context.user_data.pop("multi_sources", None)
+    return ConversationHandler.END
 
 
 async def add_league_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -181,15 +195,15 @@ def build_multi_card_conversation() -> ConversationHandler:
         entry_points=[CallbackQueryHandler(add_league_start, pattern="^add_league$")],
         states={
             AWAITING_EXTRA_URL: [
-                CallbackQueryHandler(add_league_start, pattern="^add_league$"),
-                CallbackQueryHandler(multi_done_callback, pattern="^multi_done$"),
-                CommandHandler("skip", add_league_skip),
+                CallbackQueryHandler(add_league_start,        pattern="^add_league$"),
+                CallbackQueryHandler(add_league_skip_callback, pattern="^add_league_skip$"),
+                CallbackQueryHandler(multi_done_callback,      pattern="^multi_done$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, add_league_url),
             ],
         },
         fallbacks=[
-            CommandHandler("skip", add_league_skip),
-            CallbackQueryHandler(multi_done_callback, pattern="^multi_done$"),
+            CallbackQueryHandler(add_league_skip_callback, pattern="^add_league_skip$"),
+            CallbackQueryHandler(multi_done_callback,       pattern="^multi_done$"),
         ],
         per_message=False,
     )
