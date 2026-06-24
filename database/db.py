@@ -25,6 +25,8 @@ async def init_db(db_path: str = "lfl_bot.db") -> None:
             "ALTER TABLE free_agents ADD COLUMN profile_json TEXT DEFAULT ''",
             "ALTER TABLE free_agents ADD COLUMN looking INTEGER DEFAULT 0",
             "ALTER TABLE free_agents ADD COLUMN extra_clubs TEXT DEFAULT ''",
+            "ALTER TABLE free_agents ADD COLUMN views INTEGER DEFAULT 0",
+            "ALTER TABLE free_agents ADD COLUMN photo_file_id TEXT DEFAULT ''",
         ]:
             try:
                 await conn.execute(col_sql)
@@ -43,6 +45,26 @@ async def init_db(db_path: str = "lfl_bot.db") -> None:
                 contact TEXT,
                 comment TEXT DEFAULT '',
                 active INTEGER DEFAULT 1,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS favorites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tg_id INTEGER,
+                target_type TEXT,
+                target_tg_id INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(tg_id, target_type, target_tg_id)
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS bot_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tg_id INTEGER,
+                username TEXT DEFAULT '',
+                full_name TEXT DEFAULT '',
+                text TEXT DEFAULT '',
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)

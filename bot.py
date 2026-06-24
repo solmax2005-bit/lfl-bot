@@ -30,21 +30,41 @@ from handlers.card import (
     message_url_handler, delete_card_callback,
     build_multi_card_conversation, multi_done_callback, become_agent_callback,
     skip_exp_callback, skip_comment_callback, looking_callback,
-    refresh_card_callback,
+    refresh_card_callback, upload_photo_callback, photo_message_handler,
 )
 from handlers.search import (
     build_free_conversation, find_handler,
     find_position_callback, leave_handler,
     edit_card_handler, agent_next_callback, agent_done_callback,
-    no_url_entry,
+    no_url_entry, fav_agent_callback, favorites_handler,
 )
 from handlers.teams import (
     build_team_conversation, my_team_handler,
     find_teams_handler, find_teams_callback,
-    delete_team_callback,
+    delete_team_callback, apply_team_callback,
 )
-from handlers.admin import admin_list_handler, admin_deactivate_handler
+from handlers.admin import admin_list_handler, admin_deactivate_handler, broadcast_handler
 from database.db import init_db
+from database.queries import log_message
+
+
+async def _log_all_messages(update, context):
+    if not update.message or not update.message.text:
+        return
+    user = update.effective_user
+    if not user:
+        return
+    db_path = os.getenv("DB_PATH", "lfl_bot.db")
+    try:
+        await log_message(
+            db_path,
+            tg_id=user.id,
+            username=user.username or "",
+            full_name=f"{user.first_name or ''} {user.last_name or ''}".strip(),
+            text=update.message.text,
+        )
+    except Exception:
+        pass
 
 
 async def post_init(app):
@@ -55,6 +75,9 @@ async def post_init(app):
 def main() -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     app = Application.builder().token(token).post_init(post_init).build()
+
+    # Log all messages (runs silently before all other handlers)
+    app.add_handler(MessageHandler(filters.TEXT, _log_all_messages), group=-1)
 
     # Core
     app.add_handler(CommandHandler("start",  start_handler))
@@ -85,10 +108,20 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(skip_comment_callback,  pattern=r"^skip_comment$"))
     app.add_handler(CallbackQueryHandler(looking_callback,       pattern=r"^looking:"))
     app.add_handler(CallbackQueryHandler(refresh_card_callback,  pattern=r"^refresh_card$"))
+    app.add_handler(CallbackQueryHandler(upload_photo_callback,  pattern=r"^upload_photo$"))
+    app.add_handler(CallbackQueryHandler(fav_agent_callback,     pattern=r"^fav_agent:"))
+    app.add_handler(CallbackQueryHandler(apply_team_callback,    pattern=r"^apply_team:"))
 
     # Admin
-    app.add_handler(CommandHandler("admin_list",  admin_list_handler))
-    app.add_handler(CommandHandler("admin_clear", admin_deactivate_handler))
+    app.add_handler(CommandHandler("admin_list",   admin_list_handler))
+    app.add_handler(CommandHandler("admin_clear",  admin_deactivate_handler))
+    app.add_handler(CommandHandler("broadcast",    broadcast_handler))
+
+    # Photo upload
+    app.add_handler(MessageHandler(filters.PHOTO, photo_message_handler))
+
+    # Favorites command
+    app.add_handler(CommandHandler("favorites", favorites_handler))
 
     # Text / URL fallback (must be last)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_url_handler))

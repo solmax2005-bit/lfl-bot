@@ -8,7 +8,11 @@ from telegram.ext import (
     MessageHandler, CallbackQueryHandler, filters,
 )
 from database.db import init_db
-from database.queries import upsert_agent, get_agents_by_position, deactivate_agent
+from database.queries import (
+    upsert_agent, get_agents_by_position, deactivate_agent,
+    increment_views, add_favorite, remove_favorite, get_favorites,
+    is_favorite, get_agent_by_tg_id,
+)
 from scraper.models import PlayerProfile
 from card_generator.generator import draw_card
 
@@ -185,7 +189,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 _MENU_TEXTS = [
     "🃏 Создать карточку", "🔍 Найти агентов",
     "🪪 Моя карточка", "⚽ Найти команду", "👥 Моя команда",
-    "🏟 Зарегистрировать команду",
+    "🏟 Зарегистрировать команду", "⭐ Избранное",
 ]
 
 
@@ -214,6 +218,8 @@ async def _menu_escape(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             parse_mode="Markdown",
             reply_markup=_NO_URL_KB,
         )
+    elif text == "⭐ Избранное":
+        await favorites_handler(update, context)
     else:
         from handlers.card import MAIN_KEYBOARD
         await update.message.reply_text("Нажми ещё раз.", reply_markup=MAIN_KEYBOARD)
@@ -280,9 +286,15 @@ def _agent_to_profile(agent: dict) -> PlayerProfile:
     )
 
 
-async def _send_agent_card(bot, chat_id: int, agents: list, idx: int) -> None:
+async def _send_agent_card(bot, chat_id: int, agents: list, idx: int, viewer_tg_id: int = 0) -> None:
     agent = agents[idx]
     total = len(agents)
+    agent_tg_id = agent.get("tg_id", 0)
+
+    # Increment view counter (don't count own card)
+    if viewer_tg_id and viewer_tg_id != agent_tg_id:
+        await increment_views(DB_PATH, agent_tg_id)
+
     png = draw_card(_agent_to_profile(agent))
 
     contact = agent.get("contact", "")
@@ -293,27 +305,35 @@ async def _send_agent_card(bot, chat_id: int, agents: list, idx: int) -> None:
         contact_url = contact
 
     comment = agent.get("comment", "")
-    caption = f"*{agent['name']}* ({idx + 1}/{total})"
+    views = agent.get("views", 0) + (1 if viewer_tg_id and viewer_tg_id != agent_tg_id else 0)
+    caption = f"*{agent['name']}* ({idx + 1}/{total})  👁 {views}"
     if comment:
         caption += f"\n_{comment}_"
+
+    fav = await is_favorite(DB_PATH, viewer_tg_id, "agent", agent_tg_id) if viewer_tg_id else False
 
     btn_rows = []
     if contact_url:
         btn_rows.append([InlineKeyboardButton("💬 Написать", url=contact_url)])
+    btn_rows.append([
+        InlineKeyboardButton(
+            "❤️ В избранном" if fav else "🤍 В избранное",
+            callback_data=f"fav_agent:{'del' if fav else 'add'}:{agent_tg_id}:{idx}",
+        )
+    ])
     if idx < total - 1:
         btn_rows.append([InlineKeyboardButton(
             f"Следующий ➡️ ({idx + 2}/{total})", callback_data=f"fa_next:{idx + 1}"
         )])
     else:
         btn_rows.append([InlineKeyboardButton("✅ Завершить", callback_data="fa_done")])
-    kb = InlineKeyboardMarkup(btn_rows)
 
     await bot.send_photo(
         chat_id=chat_id,
         photo=io.BytesIO(png),
         caption=caption,
         parse_mode="Markdown",
-        reply_markup=kb,
+        reply_markup=InlineKeyboardMarkup(btn_rows),
     )
 
 
@@ -328,7 +348,7 @@ async def find_position_callback(update: Update, context: ContextTypes.DEFAULT_T
         return
     context.user_data["fa_agents"] = agents
     await query.edit_message_text(f"Найдено агентов: {len(agents)}")
-    await _send_agent_card(context.bot, query.message.chat_id, agents, 0)
+    await _send_agent_card(context.bot, query.message.chat_id, agents, 0, viewer_tg_id=query.from_user.id)
 
 
 async def agent_next_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -339,7 +359,62 @@ async def agent_next_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not agents or idx >= len(agents):
         await query.edit_message_reply_markup(reply_markup=None)
         return
-    await _send_agent_card(context.bot, query.message.chat_id, agents, idx)
+    await _send_agent_card(context.bot, query.message.chat_id, agents, idx, viewer_tg_id=query.from_user.id)
+
+
+async def fav_agent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    _, action, agent_tg_id_str, idx_str = query.data.split(":")
+    agent_tg_id = int(agent_tg_id_str)
+    idx = int(idx_str)
+    viewer = query.from_user.id
+
+    if action == "add":
+        await add_favorite(DB_PATH, viewer, "agent", agent_tg_id)
+        await query.answer("❤️ Добавлено в избранное")
+        new_action = "del"
+        new_label = "❤️ В избранном"
+    else:
+        await remove_favorite(DB_PATH, viewer, "agent", agent_tg_id)
+        await query.answer("Убрано из избранного")
+        new_action = "add"
+        new_label = "🤍 В избранное"
+
+    # Update just the favorite button
+    kb = query.message.reply_markup
+    new_rows = []
+    for row in kb.inline_keyboard:
+        new_row = []
+        for btn in row:
+            if btn.callback_data and btn.callback_data.startswith("fav_agent:"):
+                new_row.append(InlineKeyboardButton(
+                    new_label,
+                    callback_data=f"fav_agent:{new_action}:{agent_tg_id}:{idx}",
+                ))
+            else:
+                new_row.append(btn)
+        new_rows.append(new_row)
+    await query.edit_message_reply_markup(InlineKeyboardMarkup(new_rows))
+
+
+async def favorites_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await init_db(DB_PATH)
+    tg_id = update.effective_user.id
+    favs = await get_favorites(DB_PATH, tg_id, "agent")
+    if not favs:
+        await update.message.reply_text("У тебя нет сохранённых агентов.\n\nНайди агентов через 🔍 Найти агентов и нажми 🤍 В избранное.")
+        return
+    agents = []
+    for f in favs:
+        agent = await get_agent_by_tg_id(DB_PATH, f["target_tg_id"])
+        if agent:
+            agents.append(agent)
+    if not agents:
+        await update.message.reply_text("Избранные агенты не найдены.")
+        return
+    context.user_data["fa_agents"] = agents
+    await update.message.reply_text(f"⭐ Избранные агенты: {len(agents)}")
+    await _send_agent_card(context.bot, update.effective_chat.id, agents, 0, viewer_tg_id=tg_id)
 
 
 async def agent_done_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

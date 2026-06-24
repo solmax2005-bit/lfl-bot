@@ -14,7 +14,7 @@ from scraper.parsers.registry import detect_url, detect_and_parse
 from scraper.models import PlayerProfile
 from card_generator.generator import draw_card
 from database.db import init_db
-from database.queries import get_agent_by_tg_id, upsert_agent, activate_agent, update_looking
+from database.queries import get_agent_by_tg_id, upsert_agent, activate_agent, update_looking, save_photo
 
 AWAITING_EXTRA_URL = 10
 
@@ -25,6 +25,7 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
         [KeyboardButton("🃏 Создать карточку"),      KeyboardButton("🪪 Моя карточка")],
         [KeyboardButton("🔍 Найти агентов"),          KeyboardButton("⚽ Найти команду")],
         [KeyboardButton("🏟 Зарегистрировать команду"), KeyboardButton("👥 Моя команда")],
+        [KeyboardButton("⭐ Избранное")],
     ],
     resize_keyboard=True,
     input_field_placeholder="Выбери действие...",
@@ -467,6 +468,7 @@ async def become_agent_callback(update: Update, context: ContextTypes.DEFAULT_TY
 _MULTI_MENU_TEXTS = [
     "🃏 Создать карточку", "🔍 Найти агентов",
     "🪪 Моя карточка", "⚽ Найти команду", "🏟 Зарегистрировать команду", "👥 Моя команда",
+    "⭐ Избранное",
 ]
 
 
@@ -524,7 +526,7 @@ def build_multi_card_conversation() -> ConversationHandler:
 
 _MENU_BUTTON_TEXTS = {
     "🃏 Создать карточку", "🔍 Найти агентов", "🪪 Моя карточка",
-    "⚽ Найти команду", "👥 Моя команда",
+    "⚽ Найти команду", "👥 Моя команда", "⭐ Избранное",
 }
 
 
@@ -592,6 +594,11 @@ async def message_url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await my_team_handler(update, context)
         return
 
+    if text == "⭐ Избранное":
+        from handlers.search import favorites_handler
+        await favorites_handler(update, context)
+        return
+
     # URL in free text
     detected = detect_url(text)
     if detected:
@@ -628,6 +635,7 @@ async def mycard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         btn_rows.append([InlineKeyboardButton("🔄 Обновить с сайта", callback_data="refresh_card")])
     if not is_active:
         btn_rows.append([InlineKeyboardButton("🏃 Добавить в поиск агентов", callback_data="become_agent")])
+    btn_rows.append([InlineKeyboardButton("📷 Загрузить фото", callback_data="upload_photo")])
     btn_rows.append([
         InlineKeyboardButton("✏️ Редактировать", callback_data="edit_card"),
         InlineKeyboardButton("🗑 Удалить",        callback_data="delete_card"),
@@ -744,3 +752,22 @@ async def delete_card_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     from database.queries import deactivate_agent
     await deactivate_agent(DB_PATH, query.from_user.id)
     await query.edit_message_caption("🗑 Анкета удалена.")
+
+
+async def upload_photo_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting_photo"] = True
+    await query.message.reply_text("📷 Отправь своё фото (не файл, а именно фото):")
+
+
+async def photo_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not context.user_data.get("awaiting_photo"):
+        return
+    tg_id = update.effective_user.id
+    photo = update.message.photo[-1]  # largest resolution
+    file_id = photo.file_id
+    await init_db(DB_PATH)
+    await save_photo(DB_PATH, tg_id, file_id)
+    context.user_data.pop("awaiting_photo", None)
+    await update.message.reply_text("✅ Фото сохранено! Нажми 🪪 Моя карточка чтобы увидеть.")

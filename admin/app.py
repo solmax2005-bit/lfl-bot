@@ -63,6 +63,19 @@ def get_stats():
         return {"error": str(e)}
 
 
+def get_messages(limit=200):
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            "SELECT * FROM bot_messages ORDER BY created_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        return []
+
+
 def get_logs(lines=200):
     try:
         if not os.path.exists(LOG_PATH):
@@ -86,7 +99,7 @@ HTML = """
   body { background: #0f1923; color: #ccddef; font-family: 'Segoe UI', sans-serif; min-height: 100vh; }
   .navbar { background: #1a3252; padding: 14px 24px; display: flex; align-items: center; gap: 24px; border-bottom: 2px solid #299dff; }
   .navbar h1 { color: #fff; font-size: 18px; flex: 1; }
-  .navbar a { color: #a8bed4; text-decoration: none; font-size: 14px; padding: 6px 14px; border-radius: 6px; transition: background .2s; }
+  .navbar a { color: #a8bed4; text-decoration: none; font-size: 14px; padding: 6px 14px; border-radius: 6px; transition: background .2s; white-space: nowrap; }
   .navbar a:hover, .navbar a.active { background: #263a50; color: #fff; }
   .navbar .logout { color: #ff6b6b; margin-left: auto; }
   .container { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
@@ -155,6 +168,7 @@ HTML = """
 <div class="navbar">
   <h1>⚽ ЛФЛ Агент</h1>
   <a href="/" class="active">Статистика</a>
+  <a href="/messages">Сообщения</a>
   <a href="/logs">Логи</a>
   <a href="/logout" class="logout">Выйти</a>
 </div>
@@ -213,10 +227,41 @@ HTML = """
   {% endif %}
 </div>
 
+{% elif page == 'messages' %}
+<div class="navbar">
+  <h1>⚽ ЛФЛ Агент</h1>
+  <a href="/">Статистика</a>
+  <a href="/messages" class="active">Сообщения</a>
+  <a href="/logs">Логи</a>
+  <a href="/logout" class="logout">Выйти</a>
+</div>
+<div class="container">
+  <div class="section">
+    <h2>Переписки пользователей</h2>
+    <table>
+      <tr><th>Время</th><th>Пользователь</th><th>ID</th><th>Сообщение</th></tr>
+      {% for m in messages %}
+      <tr>
+        <td style="color:#a8bed4;font-size:12px;white-space:nowrap">{{ m.created_at[:16] if m.created_at else '—' }}</td>
+        <td>
+          {% if m.username %}<span class="badge blue">@{{ m.username }}</span>{% endif %}
+          <span style="font-size:13px;color:#ccddef;margin-left:4px">{{ m.full_name or '—' }}</span>
+        </td>
+        <td style="color:#a8bed4;font-size:12px">{{ m.tg_id }}</td>
+        <td style="max-width:400px;word-break:break-word">{{ m.text }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" style="color:#a8bed4;text-align:center;padding:24px">Сообщений пока нет</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+
 {% elif page == 'logs' %}
 <div class="navbar">
   <h1>⚽ ЛФЛ Агент</h1>
   <a href="/">Статистика</a>
+  <a href="/messages">Сообщения</a>
   <a href="/logs" class="active">Логи</a>
   <a href="/logout" class="logout">Выйти</a>
 </div>
@@ -230,6 +275,9 @@ HTML = """
       <option value="200" selected>200</option>
       <option value="500">500</option>
     </select></label>
+    <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+      <input type="checkbox" id="errors-only" onchange="loadLogs()"> Только ошибки
+    </label>
     <button class="btn" onclick="scrollBottom()">↓ Конец</button>
   </div>
   <div class="log-box" id="log-box">Загрузка...</div>
@@ -238,13 +286,17 @@ HTML = """
 let autoTimer = null;
 function loadLogs() {
   const n = document.getElementById('lines-select').value;
+  const errOnly = document.getElementById('errors-only').checked;
   fetch('/api/logs?lines=' + n)
     .then(r => r.json())
     .then(data => {
       const box = document.getElementById('log-box');
-      box.innerHTML = data.lines.map(l => {
+      let lines = data.lines;
+      if (errOnly) lines = lines.filter(l => l.includes('ERROR') || l.includes('Traceback') || l.includes('Exception'));
+      if (!lines.length && errOnly) lines = ['✅ Ошибок не найдено'];
+      box.innerHTML = lines.map(l => {
         let cls = 'info';
-        if (l.includes('[ERROR]') || l.includes('ERROR')) cls = 'error';
+        if (l.includes('[ERROR]') || l.includes('ERROR') || l.includes('Traceback')) cls = 'error';
         else if (l.includes('[WARNING]') || l.includes('WARNING')) cls = 'warning';
         return '<div class="log-line ' + cls + '">' + escHtml(l) + '</div>';
       }).join('');
@@ -297,6 +349,13 @@ def logout():
 @login_required
 def dashboard():
     return render_template_string(HTML, page="dashboard", stats=get_stats())
+
+
+@app.route("/messages")
+@login_required
+def messages():
+    limit = int(request.args.get("limit", 200))
+    return render_template_string(HTML, page="messages", messages=get_messages(limit))
 
 
 @app.route("/logs")

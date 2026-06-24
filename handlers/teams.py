@@ -235,7 +235,7 @@ async def rt_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 _MENU_TEXTS = [
     "🃏 Создать карточку", "🔍 Найти агентов",
-    "🪪 Моя карточка", "⚽ Найти команду", "👥 Моя команда",
+    "🪪 Моя карточка", "⚽ Найти команду", "👥 Моя команда", "⭐ Избранное",
 ]
 
 
@@ -264,6 +264,9 @@ async def _menu_escape(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
             parse_mode="Markdown",
             reply_markup=_NO_URL_KB,
         )
+    elif text == "⭐ Избранное":
+        from handlers.search import favorites_handler
+        await favorites_handler(update, context)
     else:
         from handlers.card import MAIN_KEYBOARD
         await update.message.reply_text("Нажми ещё раз.", reply_markup=MAIN_KEYBOARD)
@@ -342,6 +345,28 @@ async def delete_team_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.answer()
     await deactivate_team(DB_PATH, query.from_user.id)
     await query.edit_message_caption("🗑 Объявление удалено.")
+
+
+async def apply_team_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer("Заявка отправлена!")
+    team_tg_id = int(query.data.split(":", 1)[1])
+    applicant = query.from_user
+    name = f"{applicant.first_name or ''} {applicant.last_name or ''}".strip()
+    username = f"@{applicant.username}" if applicant.username else f"tg_id: {applicant.id}"
+    try:
+        await context.bot.send_message(
+            chat_id=team_tg_id,
+            text=(
+                f"⚽ Новая заявка на вступление!\n\n"
+                f"👤 {name}\n"
+                f"📱 {username}\n\n"
+                f"Напиши игроку напрямую чтобы договориться."
+            ),
+        )
+    except Exception:
+        pass
+    await query.message.reply_text("✅ Заявка отправлена капитану команды!")
 
 
 # ── Find Teams ───────────────────────────────────────────────────────────────
@@ -472,9 +497,13 @@ async def find_teams_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                 f"https://t.me/{contact.lstrip('@')}" if contact.startswith("@")
                 else f"tel:{contact}" if contact else ""
             )
+            viewer_id = query.from_user.id
+            team_owner = team.get("tg_id", 0)
             kb_buttons = []
             if contact_url:
-                kb_buttons.append(InlineKeyboardButton("Написать", url=contact_url))
+                kb_buttons.append(InlineKeyboardButton("💬 Написать", url=contact_url))
+            if team_owner and viewer_id != team_owner:
+                kb_buttons.append(InlineKeyboardButton("📩 Подать заявку", callback_data=f"apply_team:{team_owner}"))
             kb = InlineKeyboardMarkup([kb_buttons]) if kb_buttons else None
             caption = f"*{team['name']}* — {team['league']}"
             try:
