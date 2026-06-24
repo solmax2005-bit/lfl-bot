@@ -25,30 +25,36 @@ def make_profile(is_free_agent: bool = False) -> PlayerProfile:
     )
 
 
+W, H = 600, 390
+
+
 def test_draw_card_returns_valid_png():
     profile = make_profile()
     result = draw_card(profile)
     assert isinstance(result, bytes)
     img = Image.open(io.BytesIO(result))
     assert img.format == "PNG"
-    assert img.size == (600, 360)
+    assert img.size == (W, H)
 
 
 def test_draw_card_blue_header_when_in_club():
+    # Dark theme: header top is C_HEADER_TOP = (0x1A, 0x32, 0x52)
     profile = make_profile(is_free_agent=False)
     result = draw_card(profile)
     img = Image.open(io.BytesIO(result)).convert("RGB")
-    # top-left pixel should be header blue
     r, g, b = img.getpixel((10, 10))
-    assert r == 0x1E and g == 0x5C and b == 0x9B
+    # Top-left is gradient starting from C_HEADER_TOP — r channel dominant
+    assert r > 0 and b > g  # dark blue hue
 
 
-def test_draw_card_green_header_when_free_agent():
+def test_draw_card_gold_accent_when_free_agent():
+    # Free agent uses gold accent (avatar ring, position badge)
     profile = make_profile(is_free_agent=True)
     result = draw_card(profile)
     img = Image.open(io.BytesIO(result)).convert("RGB")
-    r, g, b = img.getpixel((10, 10))
-    assert r == 0x2E and g == 0x7D and b == 0x32
+    # Avatar ring pixel should have gold accent (R>>G>>B)
+    r, g, b = img.getpixel((22, 77))  # left edge of avatar ring
+    assert r > 200 and r > b + 50  # gold: high R, low B
 
 
 def make_manual_profile(experience: str = "") -> PlayerProfile:
@@ -73,14 +79,14 @@ def test_draw_card_manual_no_experience_returns_png():
     profile = make_manual_profile(experience="")
     result = draw_card(profile)
     img = Image.open(io.BytesIO(result))
-    assert img.size == (600, 360)
+    assert img.size == (W, H)
 
 
 def test_draw_card_manual_with_experience_returns_png():
     profile = make_manual_profile(experience="ФК Звезда, ФК Луч")
     result = draw_card(profile)
     img = Image.open(io.BytesIO(result))
-    assert img.size == (600, 360)
+    assert img.size == (W, H)
 
 
 def test_draw_team_card_returns_valid_png():
@@ -98,4 +104,4 @@ def test_draw_team_card_returns_valid_png():
     assert isinstance(result, bytes)
     img = Image.open(io.BytesIO(result))
     assert img.format == "PNG"
-    assert img.size == (600, 360)
+    assert img.size == (W, H)

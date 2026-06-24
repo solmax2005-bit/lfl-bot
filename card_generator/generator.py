@@ -4,116 +4,189 @@ from PIL import Image, ImageDraw, ImageFont
 from scraper.models import PlayerProfile
 
 ASSETS = os.path.join(os.path.dirname(__file__), "assets")
-W, H = 600, 360
-HEADER_H = 130
-FOOTER_H = 60
-STATS_H = H - HEADER_H - FOOTER_H  # 170
+W, H        = 600, 390
+HEADER_H    = 155
+STATS_H     = 140
+FOOTER_H    = H - HEADER_H - STATS_H   # 95
 
-COLOR_BLUE  = (0x1E, 0x5C, 0x9B)
-COLOR_GREEN = (0x2E, 0x7D, 0x32)
-COLOR_WHITE = (0xFF, 0xFF, 0xFF)
-COLOR_LIGHT = (0xF8, 0xF9, 0xFB)
-COLOR_DARK  = (0x1A, 0x1A, 0x2E)
-COLOR_GREY  = (0x90, 0x9A, 0xAA)
+C_BG         = (0x0F, 0x19, 0x23)
+C_HEADER_TOP = (0x1A, 0x32, 0x52)
+C_STATS_BG   = (0x13, 0x1F, 0x2D)
+C_FOOTER_BG  = (0x09, 0x12, 0x1C)
+C_WHITE      = (0xFF, 0xFF, 0xFF)
+C_MUTED      = (0x6E, 0x8EA, 0xA8)   # fixed typo below
+C_MUTED      = (0x6E, 0x8E, 0xA8)
+C_DIV        = (0x1E, 0x2F, 0x42)
+C_BLUE_ACC   = (0x29, 0x9D, 0xFF)
+C_GOLD_ACC   = (0xFF, 0xC1, 0x07)
+C_GREEN_ACC  = (0x4C, 0xAF, 0x50)
+C_AV_BG      = (0x1A, 0x2E, 0x44)
 
 
-def _load_font(filename: str, size: int) -> ImageFont.FreeTypeFont:
-    path = os.path.join(ASSETS, filename)
+def _font(name: str, size: int) -> ImageFont.FreeTypeFont:
+    path = os.path.join(ASSETS, name)
     if os.path.exists(path):
         return ImageFont.truetype(path, size)
+    for fb in [r"C:\Windows\Fonts\arialbd.ttf", r"C:\Windows\Fonts\arial.ttf"]:
+        if os.path.exists(fb):
+            return ImageFont.truetype(fb, size)
     return ImageFont.load_default()
 
 
 def _initials(name: str) -> str:
-    parts = name.split()
+    parts = [p for p in name.split() if p and p[0].isalpha()]
     if len(parts) >= 2:
         return (parts[0][0] + parts[1][0]).upper()
     return name[:2].upper()
 
 
-def _draw_header(draw: ImageDraw.Draw, img: Image.Image, color, name: str, sub1: str, sub2: str, sub3: str = "") -> None:
-    draw.rectangle([(0, 0), (W, HEADER_H)], fill=color)
-    av_x, av_y, av_r = 65, 65, 45
-    draw.ellipse([(av_x - av_r, av_y - av_r), (av_x + av_r, av_y + av_r)], fill=COLOR_WHITE)
-    font_av = _load_font("Roboto-Bold.ttf", 28)
-    initials = _initials(name)
-    bbox = draw.textbbox((0, 0), initials, font=font_av)
-    tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    draw.text((av_x - tw // 2, av_y - th // 2), initials, fill=color, font=font_av)
+def _gradient(draw: ImageDraw.Draw, x0, y0, x1, y1, c1, c2) -> None:
+    steps = y1 - y0
+    for i in range(steps):
+        t = i / max(steps - 1, 1)
+        color = tuple(int(c1[j] + (c2[j] - c1[j]) * t) for j in range(3))
+        draw.line([(x0, y0 + i), (x1, y0 + i)], fill=color)
 
-    font_name = _load_font("Roboto-Bold.ttf", 22)
-    font_sub  = _load_font("Roboto-Regular.ttf", 14)
-    tx = av_x + av_r + 16
-    draw.text((tx, 18), name, fill=COLOR_WHITE, font=font_name)
-    draw.text((tx, 46), sub1, fill=(0xCC, 0xDD, 0xFF), font=font_sub)
-    draw.text((tx, 66), sub2, fill=COLOR_WHITE, font=font_sub)
-    if sub3:
-        draw.text((tx, 86), sub3, fill=(0xCC, 0xDD, 0xFF), font=font_sub)
+
+def _cx_text(draw: ImageDraw.Draw, cx: int, cy: int, text: str,
+             font: ImageFont.FreeTypeFont, fill: tuple) -> None:
+    bbox = draw.textbbox((0, 0), text, font=font)
+    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    draw.text((cx - w // 2, cy - h // 2), text, font=font, fill=fill)
+
+
+def _clip_text(draw: ImageDraw.Draw, text: str,
+               font: ImageFont.FreeTypeFont, max_w: int) -> str:
+    bbox = draw.textbbox((0, 0), text, font=font)
+    if bbox[2] - bbox[0] <= max_w:
+        return text
+    while len(text) > 1:
+        text = text[:-1]
+        bbox = draw.textbbox((0, 0), text + "…", font=font)
+        if bbox[2] - bbox[0] <= max_w:
+            return text + "…"
+    return text
+
+
+def _draw_player_header(draw: ImageDraw.Draw, profile: PlayerProfile,
+                        accent: tuple) -> None:
+    _gradient(draw, 0, 0, W, HEADER_H, C_HEADER_TOP, C_BG)
+
+    # Corner accent triangle
+    tri = [(W - 160, 0), (W, 0), (W, 100)]
+    shade = tuple(min(255, int(accent[j] * 0.12 + C_HEADER_TOP[j] * 0.88)) for j in range(3))
+    draw.polygon(tri, fill=shade)
+
+    # Avatar
+    ax, ay, ar = 76, 77, 50
+    draw.ellipse([(ax - ar - 4, ay - ar - 4), (ax + ar + 4, ay + ar + 4)], fill=accent)
+    draw.ellipse([(ax - ar - 1, ay - ar - 1), (ax + ar + 1, ay + ar + 1)], fill=C_STATS_BG)
+    draw.ellipse([(ax - ar, ay - ar), (ax + ar, ay + ar)], fill=C_AV_BG)
+    font_av = _font("Roboto-Bold.ttf", 28)
+    _cx_text(draw, ax, ay, _initials(profile.name), font_av, accent)
+
+    # Text
+    tx = ax + ar + 18
+    avail = W - tx - 20
+    fn = _font("Roboto-Bold.ttf", 24)
+    fs = _font("Roboto-Regular.ttf", 13)
+    fb = _font("Roboto-Bold.ttf", 13)
+
+    name = _clip_text(draw, profile.name, fn, avail)
+    draw.text((tx, 18), name, fill=C_WHITE, font=fn)
+
+    # Position badge
+    pos = profile.position or "—"
+    bp = _font("Roboto-Bold.ttf", 13)
+    bbox = draw.textbbox((0, 0), pos, font=bp)
+    pw, ph = bbox[2] - bbox[0], bbox[3] - bbox[1]
+    pad = 7
+    draw.rounded_rectangle(
+        [(tx - pad, 54 - pad // 2), (tx + pw + pad, 54 + ph + pad)],
+        radius=4, fill=accent,
+    )
+    draw.text((tx, 54), pos, fill=C_BG, font=bp)
+
+    draw.text((tx, 80), profile.current_club or "—", fill=C_WHITE, font=fs)
+    bd = profile.birthdate or "—"
+    age = f"  ({profile.age} лет)" if profile.age else ""
+    draw.text((tx, 100), bd + age, fill=C_MUTED, font=fs)
+
+    # Bottom accent line
+    draw.rectangle([(0, HEADER_H - 2), (W, HEADER_H)], fill=accent)
+
+
+def _draw_stats(draw: ImageDraw.Draw, profile: PlayerProfile, sy: int) -> None:
+    draw.rectangle([(0, sy), (W, sy + STATS_H)], fill=C_STATS_BG)
+    font_val = _font("Roboto-Bold.ttf", 44)
+    font_val_sm = _font("Roboto-Bold.ttf", 28)
+    font_lbl = _font("Roboto-Regular.ttf", 11)
+    col_w = W // 4
+
+    cards_str = f"{profile.yellow_cards}Ж/{profile.red_cards}К"
+    items = [
+        ("ГОЛЫ",     str(profile.goals),   font_val),
+        ("МАТЧИ",    str(profile.matches),  font_val),
+        ("ПЕРЕДАЧИ", str(profile.assists),  font_val),
+        ("КАРТОЧКИ", cards_str,             font_val_sm),
+    ]
+    for i, (label, value, vfont) in enumerate(items):
+        cx = i * col_w + col_w // 2
+        _cx_text(draw, cx, sy + 56, value, vfont, C_WHITE)
+        _cx_text(draw, cx, sy + 112, label, font_lbl, C_MUTED)
+        if i > 0:
+            draw.line([(i * col_w, sy + 22), (i * col_w, sy + STATS_H - 22)],
+                      fill=C_DIV, width=1)
+
+
+def _draw_manual_stats(draw: ImageDraw.Draw, profile: PlayerProfile, sy: int) -> None:
+    draw.rectangle([(0, sy), (W, sy + STATS_H)], fill=C_STATS_BG)
+    font_val = _font("Roboto-Bold.ttf", 18)
+    font_lbl = _font("Roboto-Regular.ttf", 12)
+    exp = profile.experience or "Нет данных об опыте"
+    _cx_text(draw, W // 2, sy + STATS_H // 2 - 10, exp, font_val, C_WHITE)
+    _cx_text(draw, W // 2, sy + STATS_H // 2 + 18, "ОПЫТ", font_lbl, C_MUTED)
+
+
+def _draw_footer(draw: ImageDraw.Draw, profile: PlayerProfile,
+                 fy: int, accent: tuple) -> None:
+    draw.rectangle([(0, fy), (W, H)], fill=C_FOOTER_BG)
+    fb = _font("Roboto-Bold.ttf", 12)
+    fr = _font("Roboto-Regular.ttf", 11)
+
+    badge_color = C_GREEN_ACC if profile.is_free_agent else accent
+    badge_txt = "● СВОБОДНЫЙ АГЕНТ" if profile.is_free_agent else f"● {profile.current_club.upper()}"
+    draw.text((16, fy + 12), badge_txt, fill=badge_color, font=fb)
+
+    clubs = " · ".join(profile.career_clubs[:6])
+    if clubs:
+        draw.text((16, fy + 34), clubs, fill=C_MUTED, font=fr)
+
+    if profile.debut_year:
+        debut = f"В лиге с {profile.debut_year}"
+        bbox = draw.textbbox((0, 0), debut, font=fr)
+        draw.text((W - (bbox[2] - bbox[0]) - 16, fy + 12), debut, fill=C_MUTED, font=fr)
+
+    if profile.lfl_url:
+        src_txt = "lfl.ru"
+        bbox = draw.textbbox((0, 0), src_txt, font=fr)
+        draw.text((W - (bbox[2] - bbox[0]) - 16, fy + 34), src_txt, fill=C_DIV, font=fr)
 
 
 def draw_card(profile: PlayerProfile) -> bytes:
-    img = Image.new("RGB", (W, H), COLOR_WHITE)
+    img = Image.new("RGB", (W, H), C_BG)
     draw = ImageDraw.Draw(img)
+    accent = C_GOLD_ACC if profile.is_free_agent else C_BLUE_ACC
 
-    header_color = COLOR_GREEN if profile.is_free_agent else COLOR_BLUE
-    age_str = f"{profile.age} лет" if profile.age else ""
-    _draw_header(
-        draw, img, header_color,
-        profile.name, profile.position, profile.current_club,
-        f"{profile.birthdate}  ({age_str})" if age_str else profile.birthdate,
-    )
+    _draw_player_header(draw, profile, accent)
 
-    stats_y = HEADER_H
-    draw.rectangle([(0, stats_y), (W, stats_y + STATS_H)], fill=COLOR_WHITE)
-
-    is_manual = not profile.lfl_url
-
-    if is_manual:
-        # Show experience text or dashes
-        font_exp  = _load_font("Roboto-Regular.ttf", 14)
-        font_lbl  = _load_font("Roboto-Regular.ttf", 12)
-        exp_text  = profile.experience if profile.experience else "—  —  —  —"
-        label     = "Прошлые команды" if profile.experience else "Нет опыта"
-        bbox = draw.textbbox((0, 0), exp_text, font=font_exp)
-        ew = bbox[2] - bbox[0]
-        draw.text(((W - ew) // 2, stats_y + 50), exp_text, fill=COLOR_DARK, font=font_exp)
-        bbox = draw.textbbox((0, 0), label, font=font_lbl)
-        lw = bbox[2] - bbox[0]
-        draw.text(((W - lw) // 2, stats_y + 80), label, fill=COLOR_GREY, font=font_lbl)
+    sy = HEADER_H
+    if profile.lfl_url:
+        _draw_stats(draw, profile, sy)
     else:
-        stat_items = [
-            ("Голы",     profile.goals),
-            ("Матчи",    profile.matches),
-            ("Передачи", profile.assists),
-            ("Карточки", f"{profile.yellow_cards}Ж / {profile.red_cards}К"),
-        ]
-        block_w  = W // 4
-        font_val = _load_font("Roboto-Bold.ttf", 36)
-        font_lbl = _load_font("Roboto-Regular.ttf", 12)
-        for i, (label, value) in enumerate(stat_items):
-            bx = i * block_w + block_w // 2
-            val_str = str(value)
-            bbox = draw.textbbox((0, 0), val_str, font=font_val)
-            vw = bbox[2] - bbox[0]
-            draw.text((bx - vw // 2, stats_y + 30), val_str, fill=COLOR_DARK, font=font_val)
-            bbox = draw.textbbox((0, 0), label, font=font_lbl)
-            lw = bbox[2] - bbox[0]
-            draw.text((bx - lw // 2, stats_y + 75), label, fill=COLOR_GREY, font=font_lbl)
-            if i > 0:
-                draw.line(
-                    [(i * block_w, stats_y + 20), (i * block_w, stats_y + STATS_H - 20)],
-                    fill=(0xE0, 0xE4, 0xEA), width=1,
-                )
+        _draw_manual_stats(draw, profile, sy)
 
-    footer_y = HEADER_H + STATS_H
-    draw.rectangle([(0, footer_y), (W, H)], fill=COLOR_LIGHT)
-    status = "🟢 Свободный агент" if profile.is_free_agent else f"🔵 {profile.current_club}"
-    clubs_str = " · ".join(profile.career_clubs[:4])
-    font_footer = _load_font("Roboto-Regular.ttf", 12)
-    draw.text((16, footer_y + 8),  status,     fill=COLOR_DARK, font=font_footer)
-    draw.text((16, footer_y + 24), clubs_str,  fill=COLOR_GREY, font=font_footer)
-    if profile.debut_year:
-        draw.text((16, footer_y + 40), f"В лиге с {profile.debut_year}", fill=COLOR_GREY, font=font_footer)
+    _draw_footer(draw, profile, HEADER_H + STATS_H, accent)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
@@ -121,42 +194,68 @@ def draw_card(profile: PlayerProfile) -> bytes:
 
 
 def draw_team_card(team: dict) -> bytes:
-    img = Image.new("RGB", (W, H), COLOR_WHITE)
+    img = Image.new("RGB", (W, H), C_BG)
     draw = ImageDraw.Draw(img)
+    accent = C_BLUE_ACC
 
-    # Header
-    _draw_header(
-        draw, img, COLOR_BLUE,
-        team["name"], team["league"],
-        team.get("division", "") or "",
-    )
+    _gradient(draw, 0, 0, W, HEADER_H, C_HEADER_TOP, C_BG)
+    draw.rectangle([(0, HEADER_H - 2), (W, HEADER_H)], fill=accent)
 
-    # Middle (white zone)
-    mid_y = HEADER_H
-    draw.rectangle([(0, mid_y), (W, mid_y + STATS_H)], fill=COLOR_WHITE)
+    # Team avatar
+    ax, ay, ar = 76, 77, 50
+    draw.ellipse([(ax-ar-4, ay-ar-4), (ax+ar+4, ay+ar+4)], fill=accent)
+    draw.ellipse([(ax-ar-1, ay-ar-1), (ax+ar+1, ay+ar+1)], fill=C_STATS_BG)
+    draw.ellipse([(ax-ar, ay-ar), (ax+ar, ay+ar)], fill=C_AV_BG)
+    font_av = _font("Roboto-Bold.ttf", 26)
+    nm = team.get("name", "??")
+    parts = nm.split()
+    init = (parts[0][0] + (parts[1][0] if len(parts) > 1 else "")).upper()
+    _cx_text(draw, ax, ay, init, font_av, accent)
 
-    font_body = _load_font("Roboto-Regular.ttf", 14)
-    font_lbl  = _load_font("Roboto-Regular.ttf", 12)
+    tx = ax + ar + 18
+    fn = _font("Roboto-Bold.ttf", 24)
+    fs = _font("Roboto-Regular.ttf", 13)
+    fb_sm = _font("Roboto-Bold.ttf", 13)
 
-    districts = team.get("districts", [])
-    positions = team.get("positions", [])
+    name = _clip_text(draw, nm, fn, W - tx - 20)
+    draw.text((tx, 18), name, fill=C_WHITE, font=fn)
 
-    dist_str = ", ".join(districts) if districts else "—"
-    pos_str  = ", ".join(positions) if positions else "—"
+    league = team.get("league", "")
+    if league:
+        bbox = draw.textbbox((0, 0), league, font=fb_sm)
+        pw, ph = bbox[2]-bbox[0], bbox[3]-bbox[1]
+        pad = 7
+        draw.rounded_rectangle([(tx-pad, 54-pad//2), (tx+pw+pad, 54+ph+pad)], radius=4, fill=accent)
+        draw.text((tx, 54), league, fill=C_BG, font=fb_sm)
 
-    draw.text((20, mid_y + 20), "Округ:", fill=COLOR_GREY, font=font_lbl)
-    draw.text((20, mid_y + 38), dist_str, fill=COLOR_DARK, font=font_body)
-    draw.text((20, mid_y + 68), "Ищем:", fill=COLOR_GREY, font=font_lbl)
-    draw.text((20, mid_y + 86), pos_str, fill=COLOR_DARK, font=font_body)
+    div = team.get("division", "")
+    if div:
+        draw.text((tx, 80), div, fill=C_WHITE, font=fs)
+
+    # Stats area
+    sy = HEADER_H
+    draw.rectangle([(0, sy), (W, sy + STATS_H)], fill=C_STATS_BG)
+    font_lbl = _font("Roboto-Regular.ttf", 12)
+    font_body = _font("Roboto-Regular.ttf", 14)
+
+    districts = ", ".join(team.get("districts", [])) or "—"
+    positions = ", ".join(team.get("positions", [])) or "—"
+
+    draw.text((20, sy + 18), "ОКРУГ", fill=C_MUTED, font=font_lbl)
+    draw.text((20, sy + 36), districts, fill=C_WHITE, font=font_body)
+    draw.text((20, sy + 72), "ИЩЕМ ПОЗИЦИИ", fill=C_MUTED, font=font_lbl)
+    draw.text((20, sy + 90), positions, fill=C_WHITE, font=font_body)
 
     # Footer
-    footer_y = HEADER_H + STATS_H
-    draw.rectangle([(0, footer_y), (W, H)], fill=COLOR_LIGHT)
-    font_footer = _load_font("Roboto-Regular.ttf", 12)
+    fy = HEADER_H + STATS_H
+    draw.rectangle([(0, fy), (W, H)], fill=C_FOOTER_BG)
+    fr = _font("Roboto-Regular.ttf", 11)
+    fb2 = _font("Roboto-Bold.ttf", 12)
     comment = team.get("comment", "")
     contact = team.get("contact", "")
-    draw.text((16, footer_y + 8),  comment or "—", fill=COLOR_DARK, font=font_footer)
-    draw.text((16, footer_y + 28), contact,        fill=COLOR_GREY, font=font_footer)
+    draw.text((16, fy + 12), comment or "—", fill=C_WHITE, font=fb2)
+    if contact:
+        draw.text((16, fy + 34), contact, fill=C_MUTED, font=fr)
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
