@@ -98,13 +98,24 @@ def _parse_lfl_html(html: str, url: str) -> PlayerProfile:
     )
 
 
+_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept-Language": "ru-RU,ru;q=0.9",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+}
+
+
 async def parse_lfl_player(url: str) -> PlayerProfile:
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; LFLBot/1.0)"}
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
-            response.encoding = "windows-1251"
-            return _parse_lfl_html(response.text, url)
-    except httpx.HTTPError as exc:
-        raise ValueError(f"Не удалось загрузить профиль ЛФЛ: {exc}") from exc
+    last_exc: Exception | None = None
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(url, headers=_HEADERS, follow_redirects=True)
+                response.raise_for_status()
+                response.encoding = "windows-1251"
+                return _parse_lfl_html(response.text, url)
+        except httpx.HTTPError as exc:
+            last_exc = exc
+        except Exception as exc:
+            raise ValueError(f"Ошибка парсера ЛФЛ: {type(exc).__name__}: {exc}") from exc
+    raise ValueError(f"Не удалось загрузить профиль ЛФЛ: {type(last_exc).__name__}") from last_exc
