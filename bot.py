@@ -18,12 +18,12 @@ from telegram.ext import (
 from handlers.card import (
     start_handler, help_handler, mycard_handler,
     message_url_handler, delete_card_callback,
-    build_multi_card_conversation, multi_done_callback,
+    build_multi_card_conversation, multi_done_callback, become_agent_callback,
 )
 from handlers.search import (
     build_free_conversation, find_handler,
     find_position_callback, leave_handler,
-    edit_card_handler,
+    edit_card_handler, agent_next_callback, agent_done_callback,
 )
 from handlers.teams import (
     build_team_conversation, my_team_handler,
@@ -59,12 +59,15 @@ def main() -> None:
 
     # Callback queries
     app.add_handler(CallbackQueryHandler(find_position_callback, pattern=r"^find:"))
+    app.add_handler(CallbackQueryHandler(agent_next_callback,    pattern=r"^fa_next:"))
+    app.add_handler(CallbackQueryHandler(agent_done_callback,    pattern=r"^fa_done$"))
     app.add_handler(CallbackQueryHandler(find_teams_callback,    pattern=r"^ft_"))
     # edit_card is handled inside build_free_conversation() entry_points (see search.py)
     app.add_handler(CallbackQueryHandler(delete_card_callback,   pattern=r"^delete_card$"))
     # edit_team is handled inside build_team_conversation() entry_points (see teams.py)
     app.add_handler(CallbackQueryHandler(delete_team_callback,   pattern=r"^delete_team$"))
     app.add_handler(CallbackQueryHandler(multi_done_callback,    pattern=r"^multi_done$"))
+    app.add_handler(CallbackQueryHandler(become_agent_callback,  pattern=r"^become_agent$"))
 
     # Admin
     app.add_handler(CommandHandler("admin_list",  admin_list_handler))

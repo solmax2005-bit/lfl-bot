@@ -6,21 +6,23 @@ async def upsert_agent(
     db_path: str, tg_id: int, name: str, position: str,
     division: str, contact: str, comment: str, lfl_url: str = "",
     experience: str = "", current_team: str = "", age: int = 0,
+    profile_json: str = "",
 ) -> None:
     async with aiosqlite.connect(db_path) as conn:
         await conn.execute("""
             INSERT INTO free_agents
                 (tg_id, name, position, division, contact, comment, lfl_url,
-                 experience, current_team, age, active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                 experience, current_team, age, profile_json, active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
             ON CONFLICT(tg_id) DO UPDATE SET
                 name=excluded.name, position=excluded.position,
                 division=excluded.division, contact=excluded.contact,
                 comment=excluded.comment, lfl_url=excluded.lfl_url,
                 experience=excluded.experience, current_team=excluded.current_team,
-                age=excluded.age, active=1, created_at=CURRENT_TIMESTAMP
+                age=excluded.age, profile_json=excluded.profile_json,
+                active=1, created_at=CURRENT_TIMESTAMP
         """, (tg_id, name, position, division, contact, comment, lfl_url,
-              experience, current_team, age))
+              experience, current_team, age, profile_json))
         await conn.commit()
 
 

@@ -235,6 +235,14 @@ async def _menu_escape(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     elif text == "🔍 Найти агентов":
         from handlers.search import find_handler
         await find_handler(update, context)
+    elif text == "📇 Карточка игрока":
+        await update.message.reply_text(
+            "Пришли ссылку на профиль игрока:\n"
+            "`https://lfl.ru/person122721?player_id=138246`\n"
+            "`https://afl.ru/players/ivanov-ivan-482748`\n"
+            "`https://f-league.ru/player/4650740`",
+            parse_mode="Markdown",
+        )
     else:
         from handlers.card import MAIN_KEYBOARD
         await update.message.reply_text("Нажми ещё раз.", reply_markup=MAIN_KEYBOARD)

@@ -1,3 +1,5 @@
+import io
+import json
 import os
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
@@ -7,6 +9,8 @@ from telegram.ext import (
 )
 from database.db import init_db
 from database.queries import upsert_agent, get_agents_by_position, deactivate_agent
+from scraper.models import PlayerProfile
+from card_generator.generator import draw_card
 
 logger = logging.getLogger(__name__)
 DB_PATH = os.getenv("DB_PATH", "lfl_bot.db")
@@ -192,9 +196,14 @@ async def _menu_escape(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         await mycard_handler(update, context)
     elif text == "🔍 Найти агентов":
         await find_handler(update, context)
-    elif text == "🏟 Зарегистрировать команду":
-        from handlers.card import MAIN_KEYBOARD
-        await update.message.reply_text("Нажми ещё раз.", reply_markup=MAIN_KEYBOARD)
+    elif text == "📇 Карточка игрока":
+        await update.message.reply_text(
+            "Пришли ссылку на профиль игрока:\n"
+            "`https://lfl.ru/person122721?player_id=138246`\n"
+            "`https://afl.ru/players/ivanov-ivan-482748`\n"
+            "`https://f-league.ru/player/4650740`",
+            parse_mode="Markdown",
+        )
     else:
         from handlers.card import MAIN_KEYBOARD
         await update.message.reply_text("Нажми ещё раз.", reply_markup=MAIN_KEYBOARD)
@@ -217,6 +226,87 @@ async def find_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text("Выбери позицию для поиска:", reply_markup=keyboard)
 
 
+def _agent_to_profile(agent: dict) -> PlayerProfile:
+    pj = agent.get("profile_json") or ""
+    if pj:
+        try:
+            d = json.loads(pj)
+            return PlayerProfile(
+                name=d.get("name", "—"),
+                position=d.get("position", "—"),
+                birthdate=d.get("birthdate", "—"),
+                age=d.get("age", 0),
+                current_club=d.get("current_club", "Свободный агент"),
+                club_id=d.get("club_id", 0),
+                career_clubs=d.get("career_clubs", []),
+                goals=d.get("goals", 0),
+                matches=d.get("matches", 0),
+                assists=d.get("assists", 0),
+                yellow_cards=d.get("yellow_cards", 0),
+                red_cards=d.get("red_cards", 0),
+                debut_year=d.get("debut_year", 0),
+                lfl_url=d.get("lfl_url", ""),
+                is_free_agent=d.get("is_free_agent", True),
+                experience=d.get("experience", ""),
+            )
+        except Exception:
+            pass
+    exp = agent.get("experience") or ""
+    career = [s.strip() for s in exp.split(",") if s.strip()]
+    return PlayerProfile(
+        name=agent.get("name", "—"),
+        position=agent.get("position", "—"),
+        birthdate="—",
+        age=agent.get("age", 0),
+        current_club=agent.get("current_team") or "Свободный агент",
+        club_id=0,
+        career_clubs=career,
+        goals=0, matches=0, assists=0,
+        yellow_cards=0, red_cards=0,
+        debut_year=0,
+        lfl_url="",
+        is_free_agent=True,
+        experience=exp,
+    )
+
+
+async def _send_agent_card(bot, chat_id: int, agents: list, idx: int) -> None:
+    agent = agents[idx]
+    total = len(agents)
+    png = draw_card(_agent_to_profile(agent))
+
+    contact = agent.get("contact", "")
+    contact_url = None
+    if contact.startswith("@"):
+        contact_url = f"https://t.me/{contact.lstrip('@')}"
+    elif contact.startswith("http"):
+        contact_url = contact
+
+    comment = agent.get("comment", "")
+    caption = f"*{agent['name']}* ({idx + 1}/{total})"
+    if comment:
+        caption += f"\n_{comment}_"
+
+    btn_rows = []
+    if contact_url:
+        btn_rows.append([InlineKeyboardButton("💬 Написать", url=contact_url)])
+    if idx < total - 1:
+        btn_rows.append([InlineKeyboardButton(
+            f"Следующий ➡️ ({idx + 2}/{total})", callback_data=f"fa_next:{idx + 1}"
+        )])
+    else:
+        btn_rows.append([InlineKeyboardButton("✅ Завершить", callback_data="fa_done")])
+    kb = InlineKeyboardMarkup(btn_rows)
+
+    await bot.send_photo(
+        chat_id=chat_id,
+        photo=io.BytesIO(png),
+        caption=caption,
+        parse_mode="Markdown",
+        reply_markup=kb,
+    )
+
+
 async def find_position_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -226,32 +316,27 @@ async def find_position_callback(update: Update, context: ContextTypes.DEFAULT_T
     if not agents:
         await query.edit_message_text("Свободных агентов не найдено.")
         return
-    await query.edit_message_text(f"Найдено: {len(agents)}")
-    for agent in agents:
-        contact = agent["contact"]
-        exp = agent.get("experience", "")
-        exp_line = f"📋 {exp}" if exp else ""
-        team_line = f"🏟 {agent['current_team']}" if agent.get("current_team") else ""
-        text = (
-            f"👤 *{agent['name']}*\n"
-            f"⚽ {agent['position']}  |  🏆 {agent.get('division', '—')}\n"
-            + (f"🎂 {agent['age']} лет\n" if agent.get("age") else "")
-            + (f"{team_line}\n" if team_line else "")
-            + (f"{exp_line}\n" if exp_line else "")
-            + f"💬 {agent.get('comment') or '—'}"
-        )
-        contact_url = (
-            f"https://t.me/{contact.lstrip('@')}" if contact.startswith("@")
-            else f"tel:{contact}"
-        )
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("Написать", url=contact_url)]])
-        try:
-            await context.bot.send_message(
-                chat_id=query.message.chat_id,
-                text=text, parse_mode="Markdown", reply_markup=kb,
-            )
-        except Exception as exc:
-            logger.warning("Failed to send agent card: %s", exc)
+    context.user_data["fa_agents"] = agents
+    await query.edit_message_text(f"Найдено агентов: {len(agents)}")
+    await _send_agent_card(context.bot, query.message.chat_id, agents, 0)
+
+
+async def agent_next_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    idx = int(query.data.split(":", 1)[1])
+    agents = context.user_data.get("fa_agents", [])
+    if not agents or idx >= len(agents):
+        await query.edit_message_reply_markup(reply_markup=None)
+        return
+    await _send_agent_card(context.bot, query.message.chat_id, agents, idx)
+
+
+async def agent_done_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer("Поиск завершён")
+    context.user_data.pop("fa_agents", None)
+    await query.edit_message_reply_markup(reply_markup=None)
 
 
 def build_free_conversation() -> ConversationHandler:

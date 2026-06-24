@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import re
 from telegram import (
@@ -13,7 +14,7 @@ from scraper.parsers.registry import detect_url, detect_and_parse
 from scraper.models import PlayerProfile
 from card_generator.generator import draw_card
 from database.db import init_db
-from database.queries import get_agent_by_tg_id
+from database.queries import get_agent_by_tg_id, upsert_agent
 
 AWAITING_EXTRA_URL = 10
 
@@ -77,10 +78,13 @@ def _merge_profiles(base: PlayerProfile, extra: PlayerProfile) -> PlayerProfile:
     )
 
 
-_ADD_LEAGUE_KB = InlineKeyboardMarkup([[
-    InlineKeyboardButton("➕ Добавить ссылку из другой лиги", callback_data="add_league"),
-    InlineKeyboardButton("✅ Готово", callback_data="multi_done"),
-]])
+_ADD_LEAGUE_KB = InlineKeyboardMarkup([
+    [InlineKeyboardButton("➕ Добавить ссылку из другой лиги", callback_data="add_league")],
+    [
+        InlineKeyboardButton("🏃 Стать свободным агентом", callback_data="become_agent"),
+        InlineKeyboardButton("✅ Готово", callback_data="multi_done"),
+    ],
+])
 
 
 async def _process_url(update: Update, url: str, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -190,22 +194,116 @@ async def multi_done_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
     return ConversationHandler.END
 
 
+def _profile_to_json(profile: PlayerProfile) -> str:
+    return json.dumps({
+        "name": profile.name,
+        "position": profile.position,
+        "birthdate": profile.birthdate,
+        "age": profile.age,
+        "current_club": profile.current_club,
+        "club_id": profile.club_id,
+        "career_clubs": profile.career_clubs,
+        "goals": profile.goals,
+        "matches": profile.matches,
+        "assists": profile.assists,
+        "yellow_cards": profile.yellow_cards,
+        "red_cards": profile.red_cards,
+        "debut_year": profile.debut_year,
+        "lfl_url": profile.lfl_url,
+        "is_free_agent": profile.is_free_agent,
+        "experience": profile.experience,
+    }, ensure_ascii=False)
+
+
+async def become_agent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    profile = context.user_data.get("multi_profile")
+    if not profile:
+        await query.answer("Сессия устарела — пришли ссылку заново.", show_alert=True)
+        return
+    await init_db(DB_PATH)
+    tg_id = update.effective_user.id
+    contact = (
+        f"@{update.effective_user.username}"
+        if update.effective_user.username
+        else str(tg_id)
+    )
+    await upsert_agent(
+        DB_PATH, tg_id,
+        name=profile.name,
+        position=profile.position,
+        division="",
+        contact=contact,
+        comment="",
+        lfl_url=profile.lfl_url,
+        experience=" · ".join(profile.career_clubs),
+        current_team="" if profile.is_free_agent else profile.current_club,
+        age=profile.age,
+        profile_json=_profile_to_json(profile),
+    )
+    await query.edit_message_caption(
+        f"✅ *{profile.name}* добавлен в поиск агентов!\n"
+        "Тебя найдут при поиске по позиции.",
+        parse_mode="Markdown",
+    )
+    context.user_data.pop("multi_profile", None)
+    context.user_data.pop("multi_sources", None)
+
+
+_MULTI_MENU_TEXTS = [
+    "📇 Карточка игрока", "🔍 Найти агентов", "✋ Стать агентом",
+    "🪪 Моя карточка", "⚽ Найти команду", "🏟 Зарегистрировать команду", "👥 Моя команда",
+]
+
+
+async def _multi_menu_escape(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.pop("multi_profile", None)
+    context.user_data.pop("multi_sources", None)
+    text = update.message.text
+    if text == "📇 Карточка игрока":
+        await update.message.reply_text(
+            "Пришли ссылку на профиль игрока:\n"
+            "`https://lfl.ru/person122721?player_id=138246`\n"
+            "`https://afl.ru/players/ivanov-ivan-482748`\n"
+            "`https://f-league.ru/player/4650740`",
+            parse_mode="Markdown",
+        )
+    elif text == "🔍 Найти агентов":
+        from handlers.search import find_handler
+        await find_handler(update, context)
+    elif text == "🪪 Моя карточка":
+        await mycard_handler(update, context)
+    elif text == "⚽ Найти команду":
+        from handlers.teams import find_teams_handler
+        await find_teams_handler(update, context)
+    elif text == "👥 Моя команда":
+        from handlers.teams import my_team_handler
+        await my_team_handler(update, context)
+    else:
+        await update.message.reply_text("Нажми ещё раз.", reply_markup=MAIN_KEYBOARD)
+    return ConversationHandler.END
+
+
 def build_multi_card_conversation() -> ConversationHandler:
     return ConversationHandler(
         entry_points=[CallbackQueryHandler(add_league_start, pattern="^add_league$")],
         states={
             AWAITING_EXTRA_URL: [
-                CallbackQueryHandler(add_league_start,        pattern="^add_league$"),
+                CallbackQueryHandler(add_league_start,         pattern="^add_league$"),
                 CallbackQueryHandler(add_league_skip_callback, pattern="^add_league_skip$"),
                 CallbackQueryHandler(multi_done_callback,      pattern="^multi_done$"),
+                MessageHandler(filters.Text(_MULTI_MENU_TEXTS), _multi_menu_escape),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, add_league_url),
             ],
         },
         fallbacks=[
             CallbackQueryHandler(add_league_skip_callback, pattern="^add_league_skip$"),
             CallbackQueryHandler(multi_done_callback,       pattern="^multi_done$"),
+            MessageHandler(filters.Text(_MULTI_MENU_TEXTS), _multi_menu_escape),
         ],
         per_message=False,
+        allow_reentry=True,
     )
 
 
