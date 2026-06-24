@@ -40,17 +40,17 @@ def test_detect_ug_lfl_not_matched():
 
 SAMPLE_LFL_HTML = """
 <html><body>
-<h1>Иванов Иван Иванович</h1>
-<div class="player-info">
-  <span class="position">Нападающий</span>
-  <span class="birthdate">15.03.1990</span>
-  <a class="club-link" href="/club/42">ФК Алматы</a>
+<div class="player_title">
+  <p class="player_title_name"><a href="/person1">Иванов Иван Иванович</a></p>
+  <p><b>Возраст:</b> 35</p>
+  <p><b>Дата рождения:</b> 15.03.1990</p>
+  <p><b>Игрок клубов:</b> <a href="/club42">ФК Алматы</a> (<a href="javascript://" title="Нападающий">нап.</a>, ЛФЛ, Юг)</p>
 </div>
-<table class="stat-table">
-  <thead><tr><th>Сезон</th><th>Команда</th><th>М</th><th>Г</th><th>П</th><th>ЖК</th><th>КК</th></tr></thead>
+<table class="round_table stats">
+  <thead><tr><th>Турнир</th><th>Команда</th><th>Заявлен</th><th>Отзаявлен</th><th>Игры</th><th>Голы</th><th>Пасы</th><th>ЖК</th><th>КК</th></tr></thead>
   <tbody>
-    <tr><td>2023</td><td>ФК Алматы</td><td>10</td><td>5</td><td>3</td><td>1</td><td>0</td></tr>
-    <tr><td>2022</td><td>ФК Тараз</td><td>8</td><td>3</td><td>2</td><td>2</td><td>1</td></tr>
+    <tr><td>Лига 2023</td><td>ФК Алматы</td><td>01.01.2023</td><td>-</td><td>10</td><td>5</td><td>3</td><td>1</td><td>0</td></tr>
+    <tr><td>Лига 2022</td><td>ФК Тараз</td><td>01.01.2022</td><td>01.12.2022</td><td>8</td><td>3</td><td>2</td><td>2</td><td>1</td></tr>
   </tbody>
 </table>
 </body></html>
