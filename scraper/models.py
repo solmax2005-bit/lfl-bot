@@ -19,3 +19,4 @@ class PlayerProfile:
     lfl_url: str
     is_free_agent: bool
     experience: str = ""
+    looking: bool = False

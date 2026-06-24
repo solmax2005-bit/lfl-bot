@@ -6,23 +6,25 @@ async def upsert_agent(
     db_path: str, tg_id: int, name: str, position: str,
     division: str, contact: str, comment: str, lfl_url: str = "",
     experience: str = "", current_team: str = "", age: int = 0,
-    profile_json: str = "",
+    profile_json: str = "", active: int = 1,
+    looking: int = 0, extra_clubs: str = "",
 ) -> None:
     async with aiosqlite.connect(db_path) as conn:
         await conn.execute("""
             INSERT INTO free_agents
                 (tg_id, name, position, division, contact, comment, lfl_url,
-                 experience, current_team, age, profile_json, active)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                 experience, current_team, age, profile_json, active, looking, extra_clubs)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(tg_id) DO UPDATE SET
                 name=excluded.name, position=excluded.position,
                 division=excluded.division, contact=excluded.contact,
                 comment=excluded.comment, lfl_url=excluded.lfl_url,
                 experience=excluded.experience, current_team=excluded.current_team,
                 age=excluded.age, profile_json=excluded.profile_json,
-                active=1, created_at=CURRENT_TIMESTAMP
+                active=excluded.active, looking=excluded.looking,
+                extra_clubs=excluded.extra_clubs, created_at=CURRENT_TIMESTAMP
         """, (tg_id, name, position, division, contact, comment, lfl_url,
-              experience, current_team, age, profile_json))
+              experience, current_team, age, profile_json, active, looking, extra_clubs))
         await conn.commit()
 
 
@@ -45,6 +47,18 @@ async def get_agents_by_position(db_path: str, position: str | None) -> list[dic
 async def deactivate_agent(db_path: str, tg_id: int) -> None:
     async with aiosqlite.connect(db_path) as conn:
         await conn.execute("UPDATE free_agents SET active=0 WHERE tg_id=?", (tg_id,))
+        await conn.commit()
+
+
+async def activate_agent(db_path: str, tg_id: int) -> None:
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("UPDATE free_agents SET active=1 WHERE tg_id=?", (tg_id,))
+        await conn.commit()
+
+
+async def update_looking(db_path: str, tg_id: int, looking: int) -> None:
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("UPDATE free_agents SET looking=? WHERE tg_id=?", (looking, tg_id))
         await conn.commit()
 
 

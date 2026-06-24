@@ -165,6 +165,8 @@ def _draw_footer(draw: ImageDraw.Draw, profile: PlayerProfile,
 
     badge_color = C_GREEN_ACC if profile.is_free_agent else accent
     badge_txt = "● СВОБОДНЫЙ АГЕНТ" if profile.is_free_agent else f"● {profile.current_club.upper()}"
+    if getattr(profile, "looking", False):
+        badge_txt += "   🔍 ИЩЕТ КОМАНДУ"
     draw.text((16, fy + 12), badge_txt, fill=badge_color, font=fb)
 
     clubs = " · ".join(profile.career_clubs[:6])

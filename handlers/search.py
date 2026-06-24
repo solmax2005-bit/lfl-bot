@@ -53,8 +53,15 @@ async def free_handler(
 
 
 async def edit_card_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Entry point for edit_card callback — starts the manual card ConversationHandler in edit mode."""
     return await free_handler(update, context, edit_mode=True)
+
+
+async def no_url_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """'Нет ссылки' button — enter manual card creation."""
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text("Как тебя зовут?")
+    return MC_NAME
 
 
 async def mc_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -176,7 +183,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 _MENU_TEXTS = [
-    "📇 Карточка игрока", "🔍 Найти агентов",
+    "🃏 Создать карточку", "🔍 Найти агентов",
     "🪪 Моя карточка", "⚽ Найти команду", "👥 Моя команда",
     "🏟 Зарегистрировать команду",
 ]
@@ -196,13 +203,16 @@ async def _menu_escape(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         await mycard_handler(update, context)
     elif text == "🔍 Найти агентов":
         await find_handler(update, context)
-    elif text == "📇 Карточка игрока":
+    elif text == "🃏 Создать карточку":
+        from handlers.card import _NO_URL_KB
         await update.message.reply_text(
-            "Пришли ссылку на профиль игрока:\n"
-            "`https://lfl.ru/person122721?player_id=138246`\n"
-            "`https://afl.ru/players/ivanov-ivan-482748`\n"
-            "`https://f-league.ru/player/4650740`",
+            "Пришли ссылку на свой профиль из поддерживаемых лиг:\n\n"
+            "• *lfl.ru* — `https://lfl.ru/personNNNNN?player_id=NNNNN`\n"
+            "• *afl.ru* — `https://afl.ru/players/имя-NNNNN`\n"
+            "• *f-league.ru* — `https://f-league.ru/player/NNNNN`\n\n"
+            "Или создай карточку вручную:",
             parse_mode="Markdown",
+            reply_markup=_NO_URL_KB,
         )
     else:
         from handlers.card import MAIN_KEYBOARD
@@ -346,8 +356,8 @@ def build_free_conversation() -> ConversationHandler:
     return ConversationHandler(
         entry_points=[
             CommandHandler("free", free_handler),
-            MessageHandler(filters.Text(["✋ Стать агентом"]), free_handler),
             CallbackQueryHandler(edit_card_handler, pattern=r"^edit_card$"),
+            CallbackQueryHandler(no_url_entry,       pattern=r"^no_url$"),
         ],
         states={
             MC_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, mc_name)],

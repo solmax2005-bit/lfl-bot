@@ -16,7 +16,7 @@ from card_generator.generator import draw_team_card
 logger = logging.getLogger(__name__)
 DB_PATH = os.getenv("DB_PATH", "lfl_bot.db")
 
-RT_NAME, RT_LEAGUE, RT_DISTRICTS, RT_DIVISION, RT_POSITIONS, RT_CONTACT, RT_COMMENT = range(7)
+RT_NAME, RT_LEAGUE, RT_DISTRICTS, RT_DIVISION, RT_POSITIONS, RT_CONTACT, RT_COMMENT, RT_CUSTOM_LEAGUE = range(8)
 
 LEAGUES    = ["ЛФЛ", "AFL", "Pari Amateur", "F-лига"]
 DISTRICTS  = ["ЮГ", "Юго-восток", "Запад", "Северо-запад", "Север", "Северо-Восток", "Восток"]
@@ -30,6 +30,7 @@ def _leagues_kb() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(l, callback_data=f"rt_league:{l}") for l in LEAGUES[:2]],
         [InlineKeyboardButton(l, callback_data=f"rt_league:{l}") for l in LEAGUES[2:]],
+        [InlineKeyboardButton("➕ Другая лига", callback_data="rt_league_custom")],
     ])
 
 
@@ -73,6 +74,20 @@ async def register_team_start(
     return RT_NAME
 
 
+async def rt_custom_league_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    league = update.message.text.strip()
+    context.user_data["rt"]["league"] = league
+    context.user_data["rt"]["sel_districts"] = set()
+    context.user_data["rt"]["districts"] = []
+    context.user_data["rt"]["division"] = ""
+    context.user_data["rt"]["sel_positions"] = set()
+    await update.message.reply_text(
+        "Выбери позиции, которых ищёте, и нажми «Готово»:",
+        reply_markup=_positions_kb(set()),
+    )
+    return RT_POSITIONS
+
+
 async def rt_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["rt"]["name"] = update.message.text.strip()
     await update.message.reply_text("Лига:", reply_markup=_leagues_kb())
@@ -82,6 +97,9 @@ async def rt_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def rt_league(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
+    if query.data == "rt_league_custom":
+        await query.edit_message_text("Введи название лиги:")
+        return RT_CUSTOM_LEAGUE
     league = query.data.split(":", 1)[1]
     context.user_data["rt"]["league"] = league
     context.user_data["rt"]["sel_districts"] = set()
@@ -216,7 +234,7 @@ async def rt_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 
 _MENU_TEXTS = [
-    "📇 Карточка игрока", "🔍 Найти агентов", "✋ Стать агентом",
+    "🃏 Создать карточку", "🔍 Найти агентов",
     "🪪 Моя карточка", "⚽ Найти команду", "👥 Моя команда",
 ]
 
@@ -235,13 +253,16 @@ async def _menu_escape(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     elif text == "🔍 Найти агентов":
         from handlers.search import find_handler
         await find_handler(update, context)
-    elif text == "📇 Карточка игрока":
+    elif text == "🃏 Создать карточку":
+        from handlers.card import _NO_URL_KB
         await update.message.reply_text(
-            "Пришли ссылку на профиль игрока:\n"
-            "`https://lfl.ru/person122721?player_id=138246`\n"
-            "`https://afl.ru/players/ivanov-ivan-482748`\n"
-            "`https://f-league.ru/player/4650740`",
+            "Пришли ссылку на свой профиль из поддерживаемых лиг:\n\n"
+            "• *lfl.ru* — `https://lfl.ru/personNNNNN?player_id=NNNNN`\n"
+            "• *afl.ru* — `https://afl.ru/players/имя-NNNNN`\n"
+            "• *f-league.ru* — `https://f-league.ru/player/NNNNN`\n\n"
+            "Или создай карточку вручную:",
             parse_mode="Markdown",
+            reply_markup=_NO_URL_KB,
         )
     else:
         from handlers.card import MAIN_KEYBOARD
@@ -259,7 +280,11 @@ def build_team_conversation() -> ConversationHandler:
         ],
         states={
             RT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, rt_name)],
-            RT_LEAGUE: [CallbackQueryHandler(rt_league, pattern=r"^rt_league:")],
+            RT_LEAGUE: [
+                CallbackQueryHandler(rt_league, pattern=r"^rt_league:"),
+                CallbackQueryHandler(rt_league, pattern=r"^rt_league_custom$"),
+            ],
+            RT_CUSTOM_LEAGUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, rt_custom_league_text)],
             RT_DISTRICTS: [
                 CallbackQueryHandler(rt_toggle_district, pattern=r"^rt_dist:[^_]"),
                 CallbackQueryHandler(rt_districts_done, pattern=r"^rt_dist_done$"),
@@ -326,17 +351,25 @@ def _ft_filter_kb(context) -> InlineKeyboardMarkup:
     sel_leagues  = ud.get("leagues", set())
     sel_dist     = ud.get("districts", set())
     sel_pos      = ud.get("positions", set())
+    custom_leagues = ud.get("custom_leagues", [])
 
     rows = []
 
-    # League row
+    # Known leagues
     league_btns = []
     for l in LEAGUES:
         mark = "✅" if l in sel_leagues else "☐"
         league_btns.append(InlineKeyboardButton(f"{mark} {l}", callback_data=f"ft_l:{l}"))
     rows.append(league_btns[:2])
     rows.append(league_btns[2:])
-    rows.append([InlineKeyboardButton("☑ Все лиги", callback_data="ft_l:all")])
+    # Custom leagues (user-entered)
+    for cl in custom_leagues:
+        mark = "✅" if cl in sel_leagues else "☐"
+        rows.append([InlineKeyboardButton(f"{mark} {cl}", callback_data=f"ft_l:{cl}")])
+    rows.append([
+        InlineKeyboardButton("☑ Все лиги",       callback_data="ft_l:all"),
+        InlineKeyboardButton("✏️ Другая лига", callback_data="ft_l_custom"),
+    ])
 
     # District row (only if ЛФЛ selected)
     if "ЛФЛ" in sel_leagues:
@@ -373,6 +406,11 @@ async def find_teams_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     ft = context.user_data.setdefault("ft", {"leagues": set(), "districts": set(), "positions": set()})
+
+    if data == "ft_l_custom":
+        context.user_data["awaiting_ft_league"] = True
+        await query.message.reply_text("Введи название лиги для поиска:")
+        return
 
     if data.startswith("ft_l:"):
         val = data.split(":", 1)[1]

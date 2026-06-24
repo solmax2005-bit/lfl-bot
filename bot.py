@@ -19,11 +19,14 @@ from handlers.card import (
     start_handler, help_handler, mycard_handler,
     message_url_handler, delete_card_callback,
     build_multi_card_conversation, multi_done_callback, become_agent_callback,
+    skip_exp_callback, skip_comment_callback, looking_callback,
+    refresh_card_callback,
 )
 from handlers.search import (
     build_free_conversation, find_handler,
     find_position_callback, leave_handler,
     edit_card_handler, agent_next_callback, agent_done_callback,
+    no_url_entry,
 )
 from handlers.teams import (
     build_team_conversation, my_team_handler,
@@ -68,6 +71,10 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(delete_team_callback,   pattern=r"^delete_team$"))
     app.add_handler(CallbackQueryHandler(multi_done_callback,    pattern=r"^multi_done$"))
     app.add_handler(CallbackQueryHandler(become_agent_callback,  pattern=r"^become_agent$"))
+    app.add_handler(CallbackQueryHandler(skip_exp_callback,      pattern=r"^skip_exp$"))
+    app.add_handler(CallbackQueryHandler(skip_comment_callback,  pattern=r"^skip_comment$"))
+    app.add_handler(CallbackQueryHandler(looking_callback,       pattern=r"^looking:"))
+    app.add_handler(CallbackQueryHandler(refresh_card_callback,  pattern=r"^refresh_card$"))
 
     # Admin
     app.add_handler(CommandHandler("admin_list",  admin_list_handler))
