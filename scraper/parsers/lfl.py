@@ -21,6 +21,7 @@ def _parse_lfl_html(html: str, url: str) -> PlayerProfile:
     # Name: <p class="player_title_name"><a href="...">Фамилия Имя</a></p>
     name_tag = soup.find("p", class_="player_title_name")
     name = name_tag.get_text(strip=True) if name_tag else "Неизвестно"
+    name = re.sub(r"[-/\\|]+$", "", name).strip()  # strip trailing junk like "-///"
 
     # Age and birthdate: inside <div class="player_title">
     player_title = soup.find("div", class_="player_title")

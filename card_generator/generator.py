@@ -14,9 +14,9 @@ C_HEADER_TOP = (0x1A, 0x32, 0x52)
 C_STATS_BG   = (0x13, 0x1F, 0x2D)
 C_FOOTER_BG  = (0x09, 0x12, 0x1C)
 C_WHITE      = (0xFF, 0xFF, 0xFF)
-C_MUTED      = (0x6E, 0x8EA, 0xA8)   # fixed typo below
-C_MUTED      = (0x6E, 0x8E, 0xA8)
-C_DIV        = (0x1E, 0x2F, 0x42)
+C_MUTED      = (0xA8, 0xBE, 0xD4)   # lighter — readable on dark bg
+C_SOFT       = (0xCC, 0xDD, 0xEE)   # near-white for secondary info
+C_DIV        = (0x26, 0x3A, 0x50)
 C_BLUE_ACC   = (0x29, 0x9D, 0xFF)
 C_GOLD_ACC   = (0xFF, 0xC1, 0x07)
 C_GREEN_ACC  = (0x4C, 0xAF, 0x50)
@@ -88,29 +88,29 @@ def _draw_player_header(draw: ImageDraw.Draw, profile: PlayerProfile,
     # Text
     tx = ax + ar + 18
     avail = W - tx - 20
-    fn = _font("Roboto-Bold.ttf", 24)
-    fs = _font("Roboto-Regular.ttf", 13)
-    fb = _font("Roboto-Bold.ttf", 13)
+    fn  = _font("Roboto-Bold.ttf",    24)
+    fb  = _font("Roboto-Bold.ttf",    14)
+    fs  = _font("Roboto-Regular.ttf", 15)
+    fsm = _font("Roboto-Regular.ttf", 13)
 
     name = _clip_text(draw, profile.name, fn, avail)
-    draw.text((tx, 18), name, fill=C_WHITE, font=fn)
+    draw.text((tx, 16), name, fill=C_WHITE, font=fn)
 
     # Position badge
     pos = profile.position or "—"
-    bp = _font("Roboto-Bold.ttf", 13)
-    bbox = draw.textbbox((0, 0), pos, font=bp)
+    bbox = draw.textbbox((0, 0), pos, font=fb)
     pw, ph = bbox[2] - bbox[0], bbox[3] - bbox[1]
     pad = 7
     draw.rounded_rectangle(
-        [(tx - pad, 54 - pad // 2), (tx + pw + pad, 54 + ph + pad)],
+        [(tx - pad, 52 - pad // 2), (tx + pw + pad, 52 + ph + pad)],
         radius=4, fill=accent,
     )
-    draw.text((tx, 54), pos, fill=C_BG, font=bp)
+    draw.text((tx, 52), pos, fill=C_BG, font=fb)
 
-    draw.text((tx, 80), profile.current_club or "—", fill=C_WHITE, font=fs)
+    draw.text((tx, 80), profile.current_club or "—", fill=C_SOFT, font=fs)
     bd = profile.birthdate or "—"
     age = f"  ({profile.age} лет)" if profile.age else ""
-    draw.text((tx, 100), bd + age, fill=C_MUTED, font=fs)
+    draw.text((tx, 102), bd + age, fill=C_MUTED, font=fsm)
 
     # Bottom accent line
     draw.rectangle([(0, HEADER_H - 2), (W, HEADER_H)], fill=accent)
@@ -120,7 +120,7 @@ def _draw_stats(draw: ImageDraw.Draw, profile: PlayerProfile, sy: int) -> None:
     draw.rectangle([(0, sy), (W, sy + STATS_H)], fill=C_STATS_BG)
     font_val = _font("Roboto-Bold.ttf", 44)
     font_val_sm = _font("Roboto-Bold.ttf", 28)
-    font_lbl = _font("Roboto-Regular.ttf", 11)
+    font_lbl = _font("Roboto-Bold.ttf", 12)
     col_w = W // 4
 
     cards_str = f"{profile.yellow_cards}Ж/{profile.red_cards}К"
@@ -151,8 +151,8 @@ def _draw_manual_stats(draw: ImageDraw.Draw, profile: PlayerProfile, sy: int) ->
 def _draw_footer(draw: ImageDraw.Draw, profile: PlayerProfile,
                  fy: int, accent: tuple) -> None:
     draw.rectangle([(0, fy), (W, H)], fill=C_FOOTER_BG)
-    fb = _font("Roboto-Bold.ttf", 12)
-    fr = _font("Roboto-Regular.ttf", 11)
+    fb = _font("Roboto-Bold.ttf", 13)
+    fr = _font("Roboto-Regular.ttf", 12)
 
     badge_color = C_GREEN_ACC if profile.is_free_agent else accent
     badge_txt = "● СВОБОДНЫЙ АГЕНТ" if profile.is_free_agent else f"● {profile.current_club.upper()}"
@@ -160,17 +160,17 @@ def _draw_footer(draw: ImageDraw.Draw, profile: PlayerProfile,
 
     clubs = " · ".join(profile.career_clubs[:6])
     if clubs:
-        draw.text((16, fy + 34), clubs, fill=C_MUTED, font=fr)
+        draw.text((16, fy + 34), clubs, fill=C_SOFT, font=fr)
 
     if profile.debut_year:
         debut = f"В лиге с {profile.debut_year}"
         bbox = draw.textbbox((0, 0), debut, font=fr)
-        draw.text((W - (bbox[2] - bbox[0]) - 16, fy + 12), debut, fill=C_MUTED, font=fr)
+        draw.text((W - (bbox[2] - bbox[0]) - 16, fy + 12), debut, fill=C_SOFT, font=fr)
 
     if profile.lfl_url:
         src_txt = "lfl.ru"
         bbox = draw.textbbox((0, 0), src_txt, font=fr)
-        draw.text((W - (bbox[2] - bbox[0]) - 16, fy + 34), src_txt, fill=C_DIV, font=fr)
+        draw.text((W - (bbox[2] - bbox[0]) - 16, fy + 34), src_txt, fill=C_MUTED, font=fr)
 
 
 def draw_card(profile: PlayerProfile) -> bytes:
