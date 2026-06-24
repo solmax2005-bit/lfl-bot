@@ -4,8 +4,11 @@ from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.ext import ContextTypes
 from database.db import init_db
 from database.queries import (
-    get_agents_by_position, deactivate_agent, get_all_tg_ids,
+    get_agents_by_position, deactivate_agent, activate_agent, get_all_tg_ids,
     create_broadcast, save_broadcast_message, get_broadcast_messages,
+    get_all_agents_admin, get_all_teams_admin,
+    delete_agent_permanently, delete_team_permanently,
+    deactivate_team,
 )
 
 DB_PATH = os.getenv("DB_PATH", "lfl_bot.db")
@@ -46,14 +49,222 @@ async def admin_deactivate_handler(update: Update, context: ContextTypes.DEFAULT
     await update.message.reply_text(f"Агент {tg_id} деактивирован.")
 
 
+_PAGE_SIZE = 6
+
+
+def _agents_kb(agents: list, page: int) -> InlineKeyboardMarkup:
+    total = len(agents)
+    start = page * _PAGE_SIZE
+    chunk = agents[start:start + _PAGE_SIZE]
+    rows = []
+    for a in chunk:
+        status = "✅" if a["active"] else "🔴"
+        toggle_label = "🙈 Скрыть" if a["active"] else "👁 Показать"
+        short = a["name"][:14]
+        rows.append([
+            InlineKeyboardButton(f"{status} {short} ({a['position'] or '—'})", callback_data="noop"),
+        ])
+        rows.append([
+            InlineKeyboardButton(toggle_label, callback_data=f"admin_toggle_agent:{a['tg_id']}:{page}"),
+            InlineKeyboardButton("🗑 Удалить", callback_data=f"admin_del_agent:{a['tg_id']}:{page}"),
+        ])
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("◀️", callback_data=f"admin_agents:{page - 1}"))
+    pages = (total + _PAGE_SIZE - 1) // _PAGE_SIZE
+    nav.append(InlineKeyboardButton(f"{page + 1}/{pages}", callback_data="noop"))
+    if start + _PAGE_SIZE < total:
+        nav.append(InlineKeyboardButton("▶️", callback_data=f"admin_agents:{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton("◀️ В меню", callback_data="admin_panel_back")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _teams_kb(teams: list, page: int) -> InlineKeyboardMarkup:
+    total = len(teams)
+    start = page * _PAGE_SIZE
+    chunk = teams[start:start + _PAGE_SIZE]
+    rows = []
+    for t in chunk:
+        status = "✅" if t["active"] else "🔴"
+        toggle_label = "🙈 Скрыть" if t["active"] else "👁 Показать"
+        short = t["name"][:14]
+        rows.append([
+            InlineKeyboardButton(f"{status} {short} ({t['league'] or '—'})", callback_data="noop"),
+        ])
+        rows.append([
+            InlineKeyboardButton(toggle_label, callback_data=f"admin_toggle_team:{t['tg_id']}:{page}"),
+            InlineKeyboardButton("🗑 Удалить", callback_data=f"admin_del_team:{t['tg_id']}:{page}"),
+        ])
+    nav = []
+    if page > 0:
+        nav.append(InlineKeyboardButton("◀️", callback_data=f"admin_teams:{page - 1}"))
+    pages = (total + _PAGE_SIZE - 1) // _PAGE_SIZE
+    nav.append(InlineKeyboardButton(f"{page + 1}/{pages}", callback_data="noop"))
+    if start + _PAGE_SIZE < total:
+        nav.append(InlineKeyboardButton("▶️", callback_data=f"admin_teams:{page + 1}"))
+    if nav:
+        rows.append(nav)
+    rows.append([InlineKeyboardButton("◀️ В меню", callback_data="admin_panel_back")])
+    return InlineKeyboardMarkup(rows)
+
+
 async def admin_panel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not _is_admin(update):
         return
     kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("📢 Сделать рассылку", callback_data="admin_broadcast_start")],
-        [InlineKeyboardButton("📋 Последние рассылки", callback_data="admin_broadcasts")],
+        [InlineKeyboardButton("📢 Сделать рассылку",    callback_data="admin_broadcast_start")],
+        [InlineKeyboardButton("📋 Последние рассылки",  callback_data="admin_broadcasts")],
+        [InlineKeyboardButton("👤 Карточки игроков",    callback_data="admin_agents:0")],
+        [InlineKeyboardButton("🏟 Карточки команд",     callback_data="admin_teams:0")],
     ])
     await update.message.reply_text("Панель администратора:", reply_markup=kb)
+
+
+async def admin_panel_back_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query.from_user.id != ADMIN_TG_ID:
+        await query.answer()
+        return
+    await query.answer()
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📢 Сделать рассылку",    callback_data="admin_broadcast_start")],
+        [InlineKeyboardButton("📋 Последние рассылки",  callback_data="admin_broadcasts")],
+        [InlineKeyboardButton("👤 Карточки игроков",    callback_data="admin_agents:0")],
+        [InlineKeyboardButton("🏟 Карточки команд",     callback_data="admin_teams:0")],
+    ])
+    await query.edit_message_text("Панель администратора:", reply_markup=kb)
+
+
+async def admin_agents_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query.from_user.id != ADMIN_TG_ID:
+        await query.answer("Нет доступа.", show_alert=True)
+        return
+    await query.answer()
+    page = int(query.data.split(":")[1])
+    await init_db(DB_PATH)
+    agents = await get_all_agents_admin(DB_PATH)
+    if not agents:
+        await query.edit_message_text("Карточек игроков нет.", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ В меню", callback_data="admin_panel_back")]
+        ]))
+        return
+    active = sum(1 for a in agents if a["active"])
+    text = f"👤 Карточки игроков: {active} активных, {len(agents) - active} скрытых"
+    await query.edit_message_text(text, reply_markup=_agents_kb(agents, page))
+
+
+async def admin_toggle_agent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query.from_user.id != ADMIN_TG_ID:
+        await query.answer("Нет доступа.", show_alert=True)
+        return
+    _, tg_id_str, page_str = query.data.split(":")
+    tg_id, page = int(tg_id_str), int(page_str)
+    await init_db(DB_PATH)
+    agents = await get_all_agents_admin(DB_PATH)
+    agent = next((a for a in agents if a["tg_id"] == tg_id), None)
+    if agent:
+        if agent["active"]:
+            await deactivate_agent(DB_PATH, tg_id)
+            await query.answer("🙈 Скрыто")
+        else:
+            await activate_agent(DB_PATH, tg_id)
+            await query.answer("👁 Показано")
+    agents = await get_all_agents_admin(DB_PATH)
+    active = sum(1 for a in agents if a["active"])
+    text = f"👤 Карточки игроков: {active} активных, {len(agents) - active} скрытых"
+    await query.edit_message_text(text, reply_markup=_agents_kb(agents, page))
+
+
+async def admin_del_agent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query.from_user.id != ADMIN_TG_ID:
+        await query.answer("Нет доступа.", show_alert=True)
+        return
+    _, tg_id_str, page_str = query.data.split(":")
+    tg_id, page = int(tg_id_str), int(page_str)
+    await init_db(DB_PATH)
+    await delete_agent_permanently(DB_PATH, tg_id)
+    await query.answer("🗑 Удалено")
+    agents = await get_all_agents_admin(DB_PATH)
+    if not agents:
+        await query.edit_message_text("Карточек игроков нет.", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ В меню", callback_data="admin_panel_back")]
+        ]))
+        return
+    page = min(page, max(0, (len(agents) - 1) // _PAGE_SIZE))
+    active = sum(1 for a in agents if a["active"])
+    text = f"👤 Карточки игроков: {active} активных, {len(agents) - active} скрытых"
+    await query.edit_message_text(text, reply_markup=_agents_kb(agents, page))
+
+
+async def admin_teams_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query.from_user.id != ADMIN_TG_ID:
+        await query.answer("Нет доступа.", show_alert=True)
+        return
+    await query.answer()
+    page = int(query.data.split(":")[1])
+    await init_db(DB_PATH)
+    teams = await get_all_teams_admin(DB_PATH)
+    if not teams:
+        await query.edit_message_text("Карточек команд нет.", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ В меню", callback_data="admin_panel_back")]
+        ]))
+        return
+    active = sum(1 for t in teams if t["active"])
+    text = f"🏟 Карточки команд: {active} активных, {len(teams) - active} скрытых"
+    await query.edit_message_text(text, reply_markup=_teams_kb(teams, page))
+
+
+async def admin_toggle_team_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query.from_user.id != ADMIN_TG_ID:
+        await query.answer("Нет доступа.", show_alert=True)
+        return
+    _, tg_id_str, page_str = query.data.split(":")
+    tg_id, page = int(tg_id_str), int(page_str)
+    await init_db(DB_PATH)
+    teams = await get_all_teams_admin(DB_PATH)
+    team = next((t for t in teams if t["tg_id"] == tg_id), None)
+    if team:
+        if team["active"]:
+            await deactivate_team(DB_PATH, tg_id)
+            await query.answer("🙈 Скрыто")
+        else:
+            async with __import__("aiosqlite").connect(DB_PATH) as conn:
+                await conn.execute("UPDATE teams SET active=1 WHERE tg_id=?", (tg_id,))
+                await conn.commit()
+            await query.answer("👁 Показано")
+    teams = await get_all_teams_admin(DB_PATH)
+    active = sum(1 for t in teams if t["active"])
+    text = f"🏟 Карточки команд: {active} активных, {len(teams) - active} скрытых"
+    await query.edit_message_text(text, reply_markup=_teams_kb(teams, page))
+
+
+async def admin_del_team_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query.from_user.id != ADMIN_TG_ID:
+        await query.answer("Нет доступа.", show_alert=True)
+        return
+    _, tg_id_str, page_str = query.data.split(":")
+    tg_id, page = int(tg_id_str), int(page_str)
+    await init_db(DB_PATH)
+    await delete_team_permanently(DB_PATH, tg_id)
+    await query.answer("🗑 Удалено")
+    teams = await get_all_teams_admin(DB_PATH)
+    if not teams:
+        await query.edit_message_text("Карточек команд нет.", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("◀️ В меню", callback_data="admin_panel_back")]
+        ]))
+        return
+    page = min(page, max(0, (len(teams) - 1) // _PAGE_SIZE))
+    active = sum(1 for t in teams if t["active"])
+    text = f"🏟 Карточки команд: {active} активных, {len(teams) - active} скрытых"
+    await query.edit_message_text(text, reply_markup=_teams_kb(teams, page))
 
 
 async def admin_broadcast_start_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

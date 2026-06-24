@@ -82,6 +82,38 @@ async def get_agents_by_position(db_path: str, position: str | None) -> list[dic
     return [dict(r) for r in rows]
 
 
+async def get_all_agents_admin(db_path: str) -> list[dict]:
+    async with aiosqlite.connect(db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        cur = await conn.execute(
+            "SELECT tg_id, name, position, active FROM free_agents ORDER BY active DESC, name ASC"
+        )
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def get_all_teams_admin(db_path: str) -> list[dict]:
+    async with aiosqlite.connect(db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        cur = await conn.execute(
+            "SELECT tg_id, name, league, active FROM teams ORDER BY active DESC, name ASC"
+        )
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def delete_agent_permanently(db_path: str, tg_id: int) -> None:
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("DELETE FROM free_agents WHERE tg_id=?", (tg_id,))
+        await conn.commit()
+
+
+async def delete_team_permanently(db_path: str, tg_id: int) -> None:
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("DELETE FROM teams WHERE tg_id=?", (tg_id,))
+        await conn.commit()
+
+
 async def deactivate_agent(db_path: str, tg_id: int) -> None:
     async with aiosqlite.connect(db_path) as conn:
         await conn.execute("UPDATE free_agents SET active=0 WHERE tg_id=?", (tg_id,))

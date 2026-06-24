@@ -52,6 +52,9 @@ from handlers.admin import (
     broadcast_handler, broadcast_delete_handler,
     admin_panel_handler, admin_broadcasts_callback, admin_del_broadcast_callback,
     admin_broadcast_start_callback, handle_broadcast_input,
+    admin_panel_back_callback,
+    admin_agents_callback, admin_toggle_agent_callback, admin_del_agent_callback,
+    admin_teams_callback, admin_toggle_team_callback, admin_del_team_callback,
 )
 from database.db import init_db
 from database.queries import log_message
@@ -158,6 +161,14 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(admin_broadcast_start_callback, pattern=r"^admin_broadcast_start$"))
     app.add_handler(CallbackQueryHandler(admin_broadcasts_callback,     pattern=r"^admin_broadcasts$"))
     app.add_handler(CallbackQueryHandler(admin_del_broadcast_callback,  pattern=r"^admin_del_broadcast:"))
+    app.add_handler(CallbackQueryHandler(admin_panel_back_callback,     pattern=r"^admin_panel_back$"))
+    app.add_handler(CallbackQueryHandler(admin_agents_callback,         pattern=r"^admin_agents:"))
+    app.add_handler(CallbackQueryHandler(admin_toggle_agent_callback,   pattern=r"^admin_toggle_agent:"))
+    app.add_handler(CallbackQueryHandler(admin_del_agent_callback,      pattern=r"^admin_del_agent:"))
+    app.add_handler(CallbackQueryHandler(admin_teams_callback,          pattern=r"^admin_teams:"))
+    app.add_handler(CallbackQueryHandler(admin_toggle_team_callback,    pattern=r"^admin_toggle_team:"))
+    app.add_handler(CallbackQueryHandler(admin_del_team_callback,       pattern=r"^admin_del_team:"))
+    app.add_handler(CallbackQueryHandler(lambda u, c: u.callback_query.answer(), pattern=r"^noop$"))
 
     # Photo upload
     app.add_handler(MessageHandler(filters.PHOTO, photo_message_handler))
