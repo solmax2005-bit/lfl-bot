@@ -68,6 +68,16 @@ def _clip_text(draw: ImageDraw.Draw, text: str,
     return text
 
 
+def _draw_person_silhouette(draw: ImageDraw.Draw, cx: int, cy: int, color: tuple) -> None:
+    """Draw a simple person icon (head + shoulders) centered at (cx, cy)."""
+    # Head
+    hr = 12
+    draw.ellipse([(cx - hr, cy - 26), (cx + hr, cy - 2)], fill=color)
+    # Shoulders — upper half of a wide ellipse
+    sw, sh = 22, 14
+    draw.pieslice([(cx - sw, cy + 4), (cx + sw, cy + 4 + sh * 2)], 180, 360, fill=color)
+
+
 def _draw_player_header(draw: ImageDraw.Draw, profile: PlayerProfile,
                         accent: tuple) -> None:
     _gradient(draw, 0, 0, W, HEADER_H, C_HEADER_TOP, C_BG)
@@ -82,8 +92,7 @@ def _draw_player_header(draw: ImageDraw.Draw, profile: PlayerProfile,
     draw.ellipse([(ax - ar - 4, ay - ar - 4), (ax + ar + 4, ay + ar + 4)], fill=accent)
     draw.ellipse([(ax - ar - 1, ay - ar - 1), (ax + ar + 1, ay + ar + 1)], fill=C_STATS_BG)
     draw.ellipse([(ax - ar, ay - ar), (ax + ar, ay + ar)], fill=C_AV_BG)
-    font_av = _font("Roboto-Bold.ttf", 28)
-    _cx_text(draw, ax, ay, _initials(profile.name), font_av, accent)
+    _draw_person_silhouette(draw, ax, ay, accent)
 
     # Text
     tx = ax + ar + 18
@@ -206,11 +215,7 @@ def draw_team_card(team: dict) -> bytes:
     draw.ellipse([(ax-ar-4, ay-ar-4), (ax+ar+4, ay+ar+4)], fill=accent)
     draw.ellipse([(ax-ar-1, ay-ar-1), (ax+ar+1, ay+ar+1)], fill=C_STATS_BG)
     draw.ellipse([(ax-ar, ay-ar), (ax+ar, ay+ar)], fill=C_AV_BG)
-    font_av = _font("Roboto-Bold.ttf", 26)
-    nm = team.get("name", "??")
-    parts = nm.split()
-    init = (parts[0][0] + (parts[1][0] if len(parts) > 1 else "")).upper()
-    _cx_text(draw, ax, ay, init, font_av, accent)
+    _draw_person_silhouette(draw, ax, ay, accent)
 
     tx = ax + ar + 18
     fn = _font("Roboto-Bold.ttf", 24)
