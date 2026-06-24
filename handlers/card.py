@@ -32,10 +32,9 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
 
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    name = update.effective_user.first_name
+    name = update.effective_user.first_name or "игрок"
     await update.message.reply_text(
-        f"Привет, {name}!\n\nЯ *ЛФЛ Агент* — твой помощник в лиге.\n\nВыбери действие 👇",
-        parse_mode="Markdown",
+        f"Привет, {name}!\n\nЯ ЛФЛ Агент — твой помощник в лиге.\n\nВыбери действие 👇",
         reply_markup=MAIN_KEYBOARD,
     )
 

@@ -2,7 +2,17 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
+import logging
 import httpx
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    handlers=[
+        logging.FileHandler("bot.log", encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
+)
 
 # Bypass SOCKS4 system proxy (Windows VPN software sets ALL_PROXY)
 _orig_httpx_init = httpx.AsyncClient.__init__
