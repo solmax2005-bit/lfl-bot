@@ -171,6 +171,36 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     return ConversationHandler.END
 
 
+_MENU_TEXTS = [
+    "📇 Карточка игрока", "🔍 Найти агентов",
+    "🪪 Моя карточка", "⚽ Найти команду", "👥 Моя команда",
+    "🏟 Зарегистрировать команду",
+]
+
+
+async def _menu_escape(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.pop("mc", None)
+    text = update.message.text
+    if text == "⚽ Найти команду":
+        from handlers.teams import find_teams_handler
+        await find_teams_handler(update, context)
+    elif text == "👥 Моя команда":
+        from handlers.teams import my_team_handler
+        await my_team_handler(update, context)
+    elif text == "🪪 Моя карточка":
+        from handlers.card import mycard_handler
+        await mycard_handler(update, context)
+    elif text == "🔍 Найти агентов":
+        await find_handler(update, context)
+    elif text == "🏟 Зарегистрировать команду":
+        from handlers.card import MAIN_KEYBOARD
+        await update.message.reply_text("Нажми ещё раз.", reply_markup=MAIN_KEYBOARD)
+    else:
+        from handlers.card import MAIN_KEYBOARD
+        await update.message.reply_text("Нажми ещё раз.", reply_markup=MAIN_KEYBOARD)
+    return ConversationHandler.END
+
+
 async def leave_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await init_db(DB_PATH)
     await deactivate_agent(DB_PATH, update.effective_user.id)
@@ -252,5 +282,9 @@ def build_free_conversation() -> ConversationHandler:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, mc_comment_text),
             ],
         },
-        fallbacks=[CommandHandler("cancel", cancel_handler)],
+        fallbacks=[
+            CommandHandler("cancel", cancel_handler),
+            MessageHandler(filters.Text(_MENU_TEXTS), _menu_escape),
+        ],
+        allow_reentry=True,
     )

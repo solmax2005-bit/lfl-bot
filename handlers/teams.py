@@ -215,6 +215,32 @@ async def rt_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
+_MENU_TEXTS = [
+    "📇 Карточка игрока", "🔍 Найти агентов", "✋ Стать агентом",
+    "🪪 Моя карточка", "⚽ Найти команду", "👥 Моя команда",
+]
+
+
+async def _menu_escape(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Exit conversation and execute the keyboard button the user actually pressed."""
+    context.user_data.pop("rt", None)
+    text = update.message.text
+    if text == "⚽ Найти команду":
+        await find_teams_handler(update, context)
+    elif text == "👥 Моя команда":
+        await my_team_handler(update, context)
+    elif text == "🪪 Моя карточка":
+        from handlers.card import mycard_handler
+        await mycard_handler(update, context)
+    elif text == "🔍 Найти агентов":
+        from handlers.search import find_handler
+        await find_handler(update, context)
+    else:
+        from handlers.card import MAIN_KEYBOARD
+        await update.message.reply_text("Нажми ещё раз.", reply_markup=MAIN_KEYBOARD)
+    return ConversationHandler.END
+
+
 def build_team_conversation() -> ConversationHandler:
     # IMPORTANT: button text must be an entry_point for PTB to track conversation state.
     return ConversationHandler(
@@ -241,7 +267,11 @@ def build_team_conversation() -> ConversationHandler:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, rt_comment_text),
             ],
         },
-        fallbacks=[CommandHandler("cancel", rt_cancel)],
+        fallbacks=[
+            CommandHandler("cancel", rt_cancel),
+            MessageHandler(filters.Text(_MENU_TEXTS), _menu_escape),
+        ],
+        allow_reentry=True,
     )
 
 
