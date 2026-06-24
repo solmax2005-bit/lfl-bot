@@ -27,7 +27,7 @@ from handlers.search import (
 from handlers.teams import (
     build_team_conversation, my_team_handler,
     find_teams_handler, find_teams_callback,
-    edit_team_callback, delete_team_callback,
+    delete_team_callback,
 )
 from handlers.admin import admin_list_handler, admin_deactivate_handler
 from database.db import init_db
@@ -60,7 +60,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(find_teams_callback,    pattern=r"^ft_"))
     # edit_card is handled inside build_free_conversation() entry_points (see search.py)
     app.add_handler(CallbackQueryHandler(delete_card_callback,   pattern=r"^delete_card$"))
-    app.add_handler(CallbackQueryHandler(edit_team_callback,     pattern=r"^edit_team$"))
+    # edit_team is handled inside build_team_conversation() entry_points (see teams.py)
     app.add_handler(CallbackQueryHandler(delete_team_callback,   pattern=r"^delete_team$"))
 
     # Admin

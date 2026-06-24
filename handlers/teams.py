@@ -65,7 +65,11 @@ async def register_team_start(
 ) -> int:
     await init_db(DB_PATH)
     context.user_data["rt"] = {}
-    await update.message.reply_text("Название команды:")
+    if update.callback_query:
+        await update.callback_query.answer()
+        await update.callback_query.message.reply_text("Название команды:")
+    else:
+        await update.message.reply_text("Название команды:")
     return RT_NAME
 
 
@@ -217,6 +221,7 @@ def build_team_conversation() -> ConversationHandler:
         entry_points=[
             CommandHandler("register_team", register_team_start),
             MessageHandler(filters.Text(["🏟 Зарегистрировать команду"]), register_team_start),
+            CallbackQueryHandler(edit_team_callback, pattern=r"^edit_team$"),
         ],
         states={
             RT_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, rt_name)],
@@ -391,7 +396,7 @@ async def find_teams_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             contact = team.get("contact", "")
             contact_url = (
                 f"https://t.me/{contact.lstrip('@')}" if contact.startswith("@")
-                else contact
+                else f"tel:{contact}" if contact else ""
             )
             kb_buttons = []
             if contact_url:
