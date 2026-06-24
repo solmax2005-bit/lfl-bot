@@ -270,10 +270,8 @@ async def my_team_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     )
 
 
-async def edit_team_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await register_team_start(update, context)
+async def edit_team_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    return await register_team_start(update, context)
 
 
 async def delete_team_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
