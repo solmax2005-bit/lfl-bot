@@ -6,6 +6,7 @@ from database.db import init_db
 from database.queries import (
     upsert_agent, get_agents_by_position, deactivate_agent,
     get_agent_by_tg_id, link_profile,
+    upsert_team, get_teams, get_team_by_tg_id, deactivate_team,
 )
 
 
@@ -86,3 +87,67 @@ async def test_link_profile():
     agent = await get_agent_by_tg_id(DB_PATH, 4001)
     os.unlink(DB_PATH)
     assert agent["lfl_url"] == "https://ug.lfl.ru/player999"
+
+
+@pytest.mark.asyncio
+async def test_free_agents_has_experience_column():
+    DB_PATH = make_db_path()
+    await init_db(DB_PATH)
+    async with aiosqlite.connect(DB_PATH) as conn:
+        cur = await conn.execute("PRAGMA table_info(free_agents)")
+        cols = [row[1] for row in await cur.fetchall()]
+    os.unlink(DB_PATH)
+    assert "experience" in cols
+    assert "current_team" in cols
+    assert "age" in cols
+
+
+@pytest.mark.asyncio
+async def test_teams_table_created():
+    DB_PATH = make_db_path()
+    await init_db(DB_PATH)
+    async with aiosqlite.connect(DB_PATH) as conn:
+        cur = await conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='teams'"
+        )
+        row = await cur.fetchone()
+    os.unlink(DB_PATH)
+    assert row is not None
+
+
+@pytest.mark.asyncio
+async def test_upsert_and_get_team():
+    DB_PATH = make_db_path()
+    await init_db(DB_PATH)
+    await upsert_team(
+        DB_PATH, 5001, "ФК Алматы", "ЛФЛ",
+        ["ЮГ", "Юго-восток"], "Первый",
+        ["Нападающий", "Полузащитник"], "@coach", "Набор активный",
+    )
+    teams = await get_teams(DB_PATH, league=None, districts=[], positions=[])
+    os.unlink(DB_PATH)
+    assert len(teams) == 1
+    assert teams[0]["name"] == "ФК Алматы"
+
+
+@pytest.mark.asyncio
+async def test_get_teams_filter_by_league():
+    DB_PATH = make_db_path()
+    await init_db(DB_PATH)
+    await upsert_team(DB_PATH, 6001, "ЛФЛ Команда", "ЛФЛ", ["ЮГ"], "Первый", ["Защитник"], "@a", "")
+    await upsert_team(DB_PATH, 6002, "AFL Команда", "AFL", [], "", ["Нападающий"], "@b", "")
+    lfl_teams = await get_teams(DB_PATH, league="ЛФЛ", districts=[], positions=[])
+    os.unlink(DB_PATH)
+    assert len(lfl_teams) == 1
+    assert lfl_teams[0]["name"] == "ЛФЛ Команда"
+
+
+@pytest.mark.asyncio
+async def test_deactivate_team():
+    DB_PATH = make_db_path()
+    await init_db(DB_PATH)
+    await upsert_team(DB_PATH, 7001, "Команда X", "AFL", [], "", ["Вратарь"], "@x", "")
+    await deactivate_team(DB_PATH, 7001)
+    teams = await get_teams(DB_PATH, league=None, districts=[], positions=[])
+    os.unlink(DB_PATH)
+    assert all(t["tg_id"] != 7001 for t in teams)

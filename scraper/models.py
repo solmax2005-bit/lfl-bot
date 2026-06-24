@@ -18,3 +18,4 @@ class PlayerProfile:
     debut_year: int
     lfl_url: str
     is_free_agent: bool
+    experience: str = ""
