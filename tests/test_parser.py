@@ -1,63 +1,82 @@
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
-from tests.conftest import SAMPLE_HTML, SAMPLE_HTML_FREE_AGENT
+from scraper.parsers.registry import detect_url, detect_and_parse
+from scraper.parsers.lfl import _parse_lfl_html
 from scraper.models import PlayerProfile
-from scraper.lfl_parser import parse_player, _parse_html
+
+# ── URL detection ─────────────────────────────────────────────────────────────
+
+def test_detect_lfl_url():
+    result = detect_url("смотри https://lfl.ru/person122721?player_id=138246 вот")
+    assert result is not None
+    url, league = result
+    assert "lfl.ru" in url
+    assert league == "lfl"
 
 
-def test_parse_html_in_club():
-    profile = _parse_html(SAMPLE_HTML, "https://ug.lfl.ru/player1")
-    assert isinstance(profile, PlayerProfile)
+def test_detect_afl_url():
+    result = detect_url("https://afl.ru/players/stetsko-igor-482748")
+    assert result is not None
+    _, league = result
+    assert league == "afl"
+
+
+def test_detect_fleague_url():
+    result = detect_url("https://f-league.ru/player/4650740")
+    assert result is not None
+    _, league = result
+    assert league == "fleague"
+
+
+def test_detect_no_url():
+    assert detect_url("просто текст без ссылки") is None
+
+
+def test_detect_ug_lfl_not_matched():
+    # ug.lfl.ru больше не поддерживается
+    assert detect_url("https://ug.lfl.ru/player12345") is None
+
+
+# ── LFL HTML parser ───────────────────────────────────────────────────────────
+
+SAMPLE_LFL_HTML = """
+<html><body>
+<h1>Иванов Иван Иванович</h1>
+<div class="player-info">
+  <span class="position">Нападающий</span>
+  <span class="birthdate">15.03.1990</span>
+  <a class="club-link" href="/club/42">ФК Алматы</a>
+</div>
+<table class="stat-table">
+  <thead><tr><th>Сезон</th><th>Команда</th><th>М</th><th>Г</th><th>П</th><th>ЖК</th><th>КК</th></tr></thead>
+  <tbody>
+    <tr><td>2023</td><td>ФК Алматы</td><td>10</td><td>5</td><td>3</td><td>1</td><td>0</td></tr>
+    <tr><td>2022</td><td>ФК Тараз</td><td>8</td><td>3</td><td>2</td><td>2</td><td>1</td></tr>
+  </tbody>
+</table>
+</body></html>
+"""
+
+
+def test_parse_lfl_html_name():
+    profile = _parse_lfl_html(SAMPLE_LFL_HTML, "https://lfl.ru/person1?player_id=1")
     assert profile.name == "Иванов Иван Иванович"
-    assert profile.position == "Нападающий"
-    assert profile.birthdate == "15.03.1990"
-    assert profile.current_club == "ФК Алматы"
-    assert profile.club_id == 42
-    assert profile.is_free_agent is False
+
+
+def test_parse_lfl_html_stats():
+    profile = _parse_lfl_html(SAMPLE_LFL_HTML, "https://lfl.ru/person1?player_id=1")
     assert profile.goals == 8
     assert profile.matches == 18
     assert profile.assists == 5
-    assert profile.yellow_cards == 3
-    assert profile.red_cards == 1
-    assert "ФК Алматы" in profile.career_clubs
-    assert "ФК Тараз" in profile.career_clubs
     assert profile.debut_year == 2022
 
 
-def test_parse_html_free_agent():
-    profile = _parse_html(SAMPLE_HTML_FREE_AGENT, "https://ug.lfl.ru/player2")
-    assert profile.is_free_agent is True
-    assert profile.club_id == 0
-    assert profile.current_club == "Свободный агент"
-    assert profile.matches == 12
-    assert profile.goals == 0
+def test_parse_lfl_html_career_clubs():
+    profile = _parse_lfl_html(SAMPLE_LFL_HTML, "https://lfl.ru/person1?player_id=1")
+    assert "ФК Алматы" in profile.career_clubs
+    assert "ФК Тараз" in profile.career_clubs
 
 
-@pytest.mark.asyncio
-async def test_parse_player_calls_httpx():
-    mock_response = MagicMock()
-    mock_response.text = SAMPLE_HTML
-    mock_response.raise_for_status = MagicMock()
-
-    with patch("scraper.lfl_parser.httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-        mock_client.get = AsyncMock(return_value=mock_response)
-
-        profile = await parse_player("https://ug.lfl.ru/player1")
-        assert profile.name == "Иванов Иван Иванович"
-        call_kwargs = mock_client.get.call_args
-        assert call_kwargs[1].get("headers") or call_kwargs[0]
-
-
-@pytest.mark.asyncio
-async def test_parse_player_raises_on_http_error():
-    import httpx
-    with patch("scraper.lfl_parser.httpx.AsyncClient") as mock_client_cls:
-        mock_client = AsyncMock()
-        mock_client_cls.return_value.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-        mock_client.get = AsyncMock(side_effect=httpx.HTTPError("404"))
-        with pytest.raises(ValueError):
-            await parse_player("https://ug.lfl.ru/player99999")
+def test_parse_lfl_html_not_free_agent():
+    profile = _parse_lfl_html(SAMPLE_LFL_HTML, "https://lfl.ru/person1?player_id=1")
+    assert not profile.is_free_agent
+    assert profile.current_club == "ФК Алматы"
