@@ -14,9 +14,18 @@ from scraper.parsers.registry import detect_url, detect_and_parse
 from scraper.models import PlayerProfile
 from card_generator.generator import draw_card
 from database.db import init_db
-from database.queries import get_agent_by_tg_id, upsert_agent, activate_agent, update_looking, save_photo
+from database.queries import get_agent_by_tg_id, upsert_agent, activate_agent, update_looking, save_photo, upsert_user
 
 AWAITING_EXTRA_URL = 10
+
+
+async def _download_avatar(bot, file_id: str) -> bytes | None:
+    try:
+        f = await bot.get_file(file_id)
+        buf = await f.download_as_bytearray()
+        return bytes(buf)
+    except Exception:
+        return None
 
 DB_PATH = os.getenv("DB_PATH", "lfl_bot.db")
 
@@ -25,7 +34,7 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
         [KeyboardButton("🃏 Создать карточку"),      KeyboardButton("🪪 Моя карточка")],
         [KeyboardButton("🔍 Найти агентов"),          KeyboardButton("⚽ Найти команду")],
         [KeyboardButton("🏟 Зарегистрировать команду"), KeyboardButton("👥 Моя команда")],
-        [KeyboardButton("⭐ Избранное")],
+        [KeyboardButton("⭐ Избранное"),               KeyboardButton("🆘 Помощь")],
     ],
     resize_keyboard=True,
     input_field_placeholder="Выбери действие...",
@@ -33,22 +42,92 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
 
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    name = update.effective_user.first_name or "игрок"
+    user = update.effective_user
+    await init_db(DB_PATH)
+    await upsert_user(
+        DB_PATH, user.id,
+        username=user.username or "",
+        full_name=f"{user.first_name or ''} {user.last_name or ''}".strip(),
+    )
+    name = user.first_name or "игрок"
     await update.message.reply_text(
         f"Привет, {name}!\n\nЯ ЛФЛ Агент — твой помощник в лиге.\n\nВыбери действие 👇",
         reply_markup=MAIN_KEYBOARD,
     )
 
 
+HELP_TEXT = (
+    "🤖 *ЛФЛ Агент — Справка*\n\n"
+    "👤 *Карточка игрока*\n"
+    "• 🃏 Создать карточку — добавь ссылку с lfl.ru, afl.ru или f-league.ru, или заполни вручную\n"
+    "• 🪪 Моя карточка — просмотр, редактирование, фото\n"
+    "• ✏️ Редактировать — изменить данные (можно оставлять поля без изменений)\n"
+    "• 📷 Загрузить фото — добавить фото на карточку\n"
+    "• 🔍 Ищу команду / ✋ Не ищу — управление видимостью\n\n"
+    "🔍 *Поиск*\n"
+    "• 🔍 Найти агентов — свободные игроки по позиции\n"
+    "• ⭐ Избранное — сохранённые анкеты\n"
+    "• ⚽ Найти команду — команды по лиге и позиции\n\n"
+    "👥 *Команды*\n"
+    "• 🏟 Зарегистрировать команду — создать анкету\n"
+    "• 👥 Моя команда — управление своей командой\n"
+    "• 📩 Подать заявку — откликнуться на команду\n\n"
+    "📢 *Уведомления*\n"
+    "При появлении нового игрока или команды, подходящих под критерии, бот пришлёт уведомление автоматически.\n\n"
+    "❓ Остались вопросы — нажми *Написать администратору* ниже."
+)
+
+
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✉️ Написать администратору", callback_data="help_contact"),
+    ]])
+    await update.message.reply_text(HELP_TEXT, parse_mode="Markdown", reply_markup=kb)
+
+
+async def help_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    kb = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✉️ Написать администратору", callback_data="help_contact"),
+    ]])
+    await update.message.reply_text(HELP_TEXT, parse_mode="Markdown", reply_markup=kb)
+
+
+async def help_contact_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    context.user_data["awaiting_help"] = True
+    await query.message.reply_text("Опиши свой вопрос или проблему, и администратор свяжется с тобой:")
+
+
+async def _handle_help_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    text = update.message.text
+    context.user_data.pop("awaiting_help", None)
+
+    # Save to DB for future admin panel
+    from database.queries import save_help_request
+    await init_db(DB_PATH)
+    full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
+    await save_help_request(DB_PATH, user.id, user.username or "", full_name, text)
+
+    # Notify admin via Telegram (uses same ADMIN_TG_ID as /admin panel)
+    from handlers.admin import ADMIN_TG_ID
+    if ADMIN_TG_ID:
+        username_part = f" @{user.username}" if user.username else ""
+        link = f"https://t.me/{user.username}" if user.username else f"tg://user?id={user.id}"
+        msg = (
+            f"🆘 *Новое обращение*\n\n"
+            f"👤 [{full_name or 'Пользователь'}]({link}){username_part}\n\n"
+            f"💬 {text}"
+        )
+        try:
+            await context.bot.send_message(ADMIN_TG_ID, msg, parse_mode="Markdown")
+        except Exception:
+            pass
+
     await update.message.reply_text(
-        "*Команды:*\n"
-        "/start — главное меню\n"
-        "/mycard — твоя карточка игрока\n"
-        "/my_team — твоя команда\n"
-        "/leave — убрать анкету агента\n"
-        "/admin_list — (admin) список агентов",
-        parse_mode="Markdown",
+        "✅ Сообщение отправлено администратору. Мы скоро свяжемся с тобой.",
+        reply_markup=MAIN_KEYBOARD,
     )
 
 
@@ -464,11 +543,23 @@ async def become_agent_callback(update: Update, context: ContextTypes.DEFAULT_TY
     except Exception:
         await query.edit_message_reply_markup(reply_markup=None)
 
+    # Notify matching teams in background
+    agent = await get_agent_by_tg_id(DB_PATH, tg_id)
+    if agent:
+        from handlers.notifications import notify_teams_new_player
+        import asyncio
+        asyncio.ensure_future(notify_teams_new_player(
+            context.bot, tg_id,
+            agent_name=agent.get("name", name),
+            position=agent.get("position", ""),
+            league=agent.get("division", "ЛФЛ") or "ЛФЛ",
+        ))
+
 
 _MULTI_MENU_TEXTS = [
     "🃏 Создать карточку", "🔍 Найти агентов",
     "🪪 Моя карточка", "⚽ Найти команду", "🏟 Зарегистрировать команду", "👥 Моя команда",
-    "⭐ Избранное",
+    "⭐ Избранное", "🆘 Помощь",
 ]
 
 
@@ -497,8 +588,13 @@ async def _multi_menu_escape(update: Update, context: ContextTypes.DEFAULT_TYPE)
     elif text == "👥 Моя команда":
         from handlers.teams import my_team_handler
         await my_team_handler(update, context)
+    elif text == "🆘 Помощь":
+        await help_button_handler(update, context)
     else:
-        await update.message.reply_text("Нажми ещё раз.", reply_markup=MAIN_KEYBOARD)
+        await update.message.reply_text(
+            "Что-то пошло не так. Нажми /start чтобы вернуться в главное меню.",
+            reply_markup=MAIN_KEYBOARD,
+        )
     return ConversationHandler.END
 
 
@@ -526,18 +622,30 @@ def build_multi_card_conversation() -> ConversationHandler:
 
 _MENU_BUTTON_TEXTS = {
     "🃏 Создать карточку", "🔍 Найти агентов", "🪪 Моя карточка",
-    "⚽ Найти команду", "👥 Моя команда", "⭐ Избранное",
+    "⚽ Найти команду", "👥 Моя команда", "⭐ Избранное", "🆘 Помощь",
 }
 
 
 async def message_url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = update.message.text or ""
 
-    # Menu buttons cancel any pending input collection
+    # Priority: broadcast input
+    if context.user_data.get("awaiting_broadcast") and text not in _MENU_BUTTON_TEXTS:
+        from handlers.admin import handle_broadcast_input
+        await handle_broadcast_input(update, context)
+        return
+
+    # Priority: help message to admin
+    if context.user_data.get("awaiting_help") and text not in _MENU_BUTTON_TEXTS:
+        await _handle_help_message(update, context)
+        return
+
     if text in _MENU_BUTTON_TEXTS:
         context.user_data.pop("awaiting_exp", None)
         context.user_data.pop("awaiting_comment", None)
         context.user_data.pop("awaiting_ft_league", None)
+        context.user_data.pop("awaiting_broadcast", None)
+        context.user_data.pop("awaiting_help", None)
     elif context.user_data.get("awaiting_ft_league"):
         league = text.strip()
         ft = context.user_data.setdefault("ft", {"leagues": set(), "districts": set(), "positions": set()})
@@ -599,6 +707,10 @@ async def message_url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         await favorites_handler(update, context)
         return
 
+    if text == "🆘 Помощь":
+        await help_button_handler(update, context)
+        return
+
     # URL in free text
     detected = detect_url(text)
     if detected:
@@ -619,11 +731,13 @@ async def mycard_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         return
 
     profile = _profile_from_agent(agent)
-    png = draw_card(profile)
+    avatar = await _download_avatar(context.bot, agent["photo_file_id"]) if agent.get("photo_file_id") else None
+    png = draw_card(profile, avatar_bytes=avatar)
     is_active = bool(agent.get("active"))
     looking = bool(agent.get("looking", 0))
+    views = agent.get("views", 0)
     status = "" if is_active else "\n_Не отображаешься в поиске агентов_"
-    caption = f"*{agent['name']}* — {agent.get('position', '—')}{status}"
+    caption = f"*{agent['name']}* — {agent.get('position', '—')}  👁 {views}{status}"
 
     btn_rows = [
         [
@@ -722,7 +836,8 @@ async def refresh_card_callback(update: Update, context: ContextTypes.DEFAULT_TY
         extra_clubs=agent.get("extra_clubs", ""),
     )
 
-    png = draw_card(fresh)
+    avatar = await _download_avatar(context.bot, agent["photo_file_id"]) if agent.get("photo_file_id") else None
+    png = draw_card(fresh, avatar_bytes=avatar)
     is_active = bool(agent.get("active"))
     looking = fresh.looking
     status = "" if is_active else "\n_Не отображаешься в поиске агентов_"
@@ -762,6 +877,12 @@ async def upload_photo_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def photo_message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    from handlers.admin import handle_broadcast_input
+    if await handle_broadcast_input(update, context):
+        return
+    if context.user_data.get("awaiting_help"):
+        await update.message.reply_text("Пожалуйста, опиши проблему текстом:")
+        return
     if not context.user_data.get("awaiting_photo"):
         return
     tg_id = update.effective_user.id

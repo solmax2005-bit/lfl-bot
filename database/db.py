@@ -68,4 +68,37 @@ async def init_db(db_path: str = "lfl_bot.db") -> None:
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                tg_id INTEGER PRIMARY KEY,
+                username TEXT DEFAULT '',
+                full_name TEXT DEFAULT '',
+                first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS broadcasts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS broadcast_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                broadcast_id INTEGER,
+                chat_id INTEGER,
+                message_id INTEGER
+            )
+        """)
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS help_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tg_id INTEGER,
+                username TEXT DEFAULT '',
+                full_name TEXT DEFAULT '',
+                text TEXT DEFAULT '',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
         await conn.commit()

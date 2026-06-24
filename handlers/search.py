@@ -27,33 +27,135 @@ LEAGUES = ["ЛФЛ", "AFL", "Pari Amateur", "F-лига"]
 _CANCEL_KB = ReplyKeyboardMarkup([[KeyboardButton("/cancel")]], resize_keyboard=True, one_time_keyboard=True)
 
 
-def _pos_kb():
-    return InlineKeyboardMarkup([
+def _keep_btn(field: str, value) -> list | None:
+    """Return a [keep button] row if value is non-empty, else None."""
+    if not value and value != 0:
+        return None
+    display = str(value)
+    if len(display) > 28:
+        display = display[:28] + "…"
+    return [InlineKeyboardButton(f"⬅️ Оставить: {display}", callback_data=f"mc_keep:{field}")]
+
+
+def _pos_kb(keep_pos: str = None) -> InlineKeyboardMarkup:
+    rows = [
         [InlineKeyboardButton(p, callback_data=f"mc_pos:{p}") for p in POSITIONS[:2]],
         [InlineKeyboardButton(p, callback_data=f"mc_pos:{p}") for p in POSITIONS[2:]],
-    ])
+    ]
+    if keep_pos:
+        rows.append([InlineKeyboardButton(f"⬅️ Оставить: {keep_pos}", callback_data="mc_keep:pos")])
+    return InlineKeyboardMarkup(rows)
 
 
-def _league_kb():
-    return InlineKeyboardMarkup([
+def _league_kb(keep_league: str = None) -> InlineKeyboardMarkup:
+    rows = [
         [InlineKeyboardButton(l, callback_data=f"mc_league:{l}") for l in LEAGUES[:2]],
         [InlineKeyboardButton(l, callback_data=f"mc_league:{l}") for l in LEAGUES[2:]],
-    ])
+    ]
+    if keep_league:
+        rows.append([InlineKeyboardButton(f"⬅️ Оставить: {keep_league}", callback_data="mc_keep:league")])
+    return InlineKeyboardMarkup(rows)
 
+
+def _old(context) -> dict:
+    return context.user_data.get("old_mc", {})
+
+
+def _edit(context) -> bool:
+    return context.user_data.get("edit_mode", False)
+
+
+# ── prompt helpers ──────────────────────────────────────────────────────────
+
+async def _prompt_name(msg, context):
+    old = _old(context)
+    rows = []
+    kb_row = _keep_btn("name", old.get("name", "")) if _edit(context) else None
+    kb = InlineKeyboardMarkup([kb_row]) if kb_row else None
+    await msg.reply_text("Как тебя зовут?", reply_markup=kb)
+    return MC_NAME
+
+
+async def _prompt_pos(msg, context):
+    old = _old(context)
+    keep = old.get("position", "") if _edit(context) else None
+    await msg.reply_text("Позиция:", reply_markup=_pos_kb(keep))
+    return MC_POS
+
+
+async def _prompt_age(msg, context):
+    old = _old(context)
+    rows = [[InlineKeyboardButton("Нет команды", callback_data="mc_team:none")]]
+    kb_row = _keep_btn("age", old.get("age", 0)) if _edit(context) else None
+    kb = InlineKeyboardMarkup([kb_row]) if kb_row else None
+    await msg.reply_text("Возраст (полных лет):", reply_markup=kb)
+    return MC_AGE
+
+
+async def _prompt_team(msg, context):
+    old = _old(context)
+    rows = [[InlineKeyboardButton("Нет команды", callback_data="mc_team:none")]]
+    kb_row = _keep_btn("team", old.get("current_team", "")) if _edit(context) else None
+    if kb_row:
+        rows.append(kb_row)
+    kb = InlineKeyboardMarkup(rows)
+    await msg.reply_text("Текущая команда (или нажми кнопку):", reply_markup=kb)
+    return MC_TEAM
+
+
+async def _prompt_league(msg, context):
+    old = _old(context)
+    keep = old.get("division", "") if _edit(context) else None
+    await msg.reply_text("Лига:", reply_markup=_league_kb(keep))
+    return MC_LEAGUE
+
+
+async def _prompt_exp(msg, context):
+    old = _old(context)
+    rows = [[InlineKeyboardButton("Нет опыта", callback_data="mc_exp:none")]]
+    kb_row = _keep_btn("exp", old.get("experience", "")) if _edit(context) else None
+    if kb_row:
+        rows.append(kb_row)
+    await msg.reply_text(
+        "Прошлый опыт — перечисли команды через запятую\n(или нажми «Нет опыта»):",
+        reply_markup=InlineKeyboardMarkup(rows),
+    )
+    return MC_EXP
+
+
+async def _prompt_comment(msg, context):
+    old = _old(context)
+    rows = [[InlineKeyboardButton("Пропустить", callback_data="mc_comment:skip")]]
+    kb_row = _keep_btn("comment", old.get("comment", "")) if _edit(context) else None
+    if kb_row:
+        rows.append(kb_row)
+    await msg.reply_text("Комментарий (о себе, пожеланиях и т.д.):", reply_markup=InlineKeyboardMarkup(rows))
+    return MC_COMMENT
+
+
+# ── entry points ────────────────────────────────────────────────────────────
 
 async def free_handler(
     update: Update, context: ContextTypes.DEFAULT_TYPE, edit_mode: bool = False
 ) -> int:
     await init_db(DB_PATH)
     context.user_data["edit_mode"] = edit_mode
-    prompt = "Редактируем карточку. " if edit_mode else ""
-    # Called from message button OR callback query (edit_card inline button)
+    if edit_mode:
+        tg_id = update.effective_user.id
+        agent = await get_agent_by_tg_id(DB_PATH, tg_id)
+        context.user_data["old_mc"] = agent or {}
+    else:
+        context.user_data["old_mc"] = {}
+
     if update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.message.reply_text(f"{prompt}Как тебя зовут?")
+        msg = update.callback_query.message
     else:
-        await update.message.reply_text(f"{prompt}Как тебя зовут?")
-    return MC_NAME
+        msg = update.message
+
+    prefix = "Редактируем карточку. " if edit_mode else ""
+    await msg.reply_text(f"{prefix}Шаг 1/7")
+    return await _prompt_name(msg, context)
 
 
 async def edit_card_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -61,25 +163,25 @@ async def edit_card_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def no_url_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """'Нет ссылки' button — enter manual card creation."""
     query = update.callback_query
     await query.answer()
-    await query.message.reply_text("Как тебя зовут?")
-    return MC_NAME
+    context.user_data["edit_mode"] = False
+    context.user_data["old_mc"] = {}
+    return await _prompt_name(query.message, context)
 
+
+# ── step handlers ───────────────────────────────────────────────────────────
 
 async def mc_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["mc_name"] = update.message.text.strip()
-    await update.message.reply_text("Позиция:", reply_markup=_pos_kb())
-    return MC_POS
+    return await _prompt_pos(update.message, context)
 
 
 async def mc_pos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     context.user_data["mc_pos"] = query.data.split(":", 1)[1]
-    await query.edit_message_text("Возраст (полных лет):")
-    return MC_AGE
+    return await _prompt_age(query.message, context)
 
 
 async def mc_age(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -88,52 +190,38 @@ async def mc_age(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         await update.message.reply_text("Введи число от 10 до 60:")
         return MC_AGE
     context.user_data["mc_age"] = int(text)
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("Нет команды", callback_data="mc_team:none")]])
-    await update.message.reply_text("Текущая команда (или нажми кнопку):", reply_markup=kb)
-    return MC_TEAM
+    return await _prompt_team(update.message, context)
 
 
 async def mc_team_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["mc_team"] = update.message.text.strip()
-    await update.message.reply_text("Лига:", reply_markup=_league_kb())
-    return MC_LEAGUE
+    return await _prompt_league(update.message, context)
 
 
 async def mc_team_none(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     context.user_data["mc_team"] = ""
-    await query.edit_message_text("Лига:")
-    await query.message.reply_text("Выбери лигу:", reply_markup=_league_kb())
-    return MC_LEAGUE
+    return await _prompt_league(query.message, context)
 
 
 async def mc_league(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     context.user_data["mc_league"] = query.data.split(":", 1)[1]
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("Нет опыта", callback_data="mc_exp:none")]])
-    await query.edit_message_text(
-        "Прошлый опыт — перечисли команды через запятую\n(или нажми «Нет опыта»):",
-        reply_markup=kb,
-    )
-    return MC_EXP
+    return await _prompt_exp(query.message, context)
 
 
 async def mc_exp_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data["mc_exp"] = update.message.text.strip()
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="mc_comment:skip")]])
-    await update.message.reply_text("Комментарий (о себе, пожеланиях и т.д.):", reply_markup=kb)
-    return MC_COMMENT
+    return await _prompt_comment(update.message, context)
 
 
 async def mc_exp_none(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
     context.user_data["mc_exp"] = ""
-    kb = InlineKeyboardMarkup([[InlineKeyboardButton("Пропустить", callback_data="mc_comment:skip")]])
-    await query.edit_message_text("Комментарий:", reply_markup=kb)
-    return MC_COMMENT
+    return await _prompt_comment(query.message, context)
 
 
 async def mc_comment_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -147,6 +235,41 @@ async def mc_comment_skip(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     context.user_data["mc_comment"] = ""
     return await _save_manual(update, context, via_query=query)
 
+
+# ── keep handler (single handler for all fields) ────────────────────────────
+
+async def mc_keep_cb(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """User pressed 'Оставить' — keep old value and move to next step."""
+    query = update.callback_query
+    await query.answer("Оставлено без изменений")
+    field = query.data.split(":", 1)[1]
+    old = _old(context)
+
+    if field == "name":
+        context.user_data["mc_name"] = old.get("name", "")
+        return await _prompt_pos(query.message, context)
+    elif field == "pos":
+        context.user_data["mc_pos"] = old.get("position", "")
+        return await _prompt_age(query.message, context)
+    elif field == "age":
+        context.user_data["mc_age"] = old.get("age", 0)
+        return await _prompt_team(query.message, context)
+    elif field == "team":
+        context.user_data["mc_team"] = old.get("current_team", "")
+        return await _prompt_league(query.message, context)
+    elif field == "league":
+        context.user_data["mc_league"] = old.get("division", "")
+        return await _prompt_exp(query.message, context)
+    elif field == "exp":
+        context.user_data["mc_exp"] = old.get("experience", "")
+        return await _prompt_comment(query.message, context)
+    elif field == "comment":
+        context.user_data["mc_comment"] = old.get("comment", "")
+        return await _save_manual(update, context, via_query=query)
+    return MC_COMMENT
+
+
+# ── save ─────────────────────────────────────────────────────────────────────
 
 async def _save_manual(
     update: Update, context: ContextTypes.DEFAULT_TYPE, via_query=None
@@ -178,6 +301,17 @@ async def _save_manual(
         await via_query.edit_message_text(text)
     else:
         await update.message.reply_text(text)
+
+    # Notify matching teams in background
+    from handlers.notifications import notify_teams_new_player
+    import asyncio
+    asyncio.ensure_future(notify_teams_new_player(
+        context.bot, tg_id,
+        agent_name=d["mc_name"],
+        position=d["mc_pos"],
+        league=d["mc_league"],
+    ))
+
     return ConversationHandler.END
 
 
@@ -189,7 +323,7 @@ async def cancel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 _MENU_TEXTS = [
     "🃏 Создать карточку", "🔍 Найти агентов",
     "🪪 Моя карточка", "⚽ Найти команду", "👥 Моя команда",
-    "🏟 Зарегистрировать команду", "⭐ Избранное",
+    "🏟 Зарегистрировать команду", "⭐ Избранное", "🆘 Помощь",
 ]
 
 
@@ -220,9 +354,15 @@ async def _menu_escape(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         )
     elif text == "⭐ Избранное":
         await favorites_handler(update, context)
+    elif text == "🆘 Помощь":
+        from handlers.card import help_button_handler
+        await help_button_handler(update, context)
     else:
         from handlers.card import MAIN_KEYBOARD
-        await update.message.reply_text("Нажми ещё раз.", reply_markup=MAIN_KEYBOARD)
+        await update.message.reply_text(
+            "Что-то пошло не так. Нажми /start чтобы вернуться в главное меню.",
+            reply_markup=MAIN_KEYBOARD,
+        )
     return ConversationHandler.END
 
 
@@ -291,11 +431,12 @@ async def _send_agent_card(bot, chat_id: int, agents: list, idx: int, viewer_tg_
     total = len(agents)
     agent_tg_id = agent.get("tg_id", 0)
 
-    # Increment view counter (don't count own card)
     if viewer_tg_id and viewer_tg_id != agent_tg_id:
         await increment_views(DB_PATH, agent_tg_id)
 
-    png = draw_card(_agent_to_profile(agent))
+    from handlers.card import _download_avatar
+    avatar = await _download_avatar(bot, agent["photo_file_id"]) if agent.get("photo_file_id") else None
+    png = draw_card(_agent_to_profile(agent), avatar_bytes=avatar)
 
     contact = agent.get("contact", "")
     contact_url = None
@@ -305,8 +446,7 @@ async def _send_agent_card(bot, chat_id: int, agents: list, idx: int, viewer_tg_
         contact_url = contact
 
     comment = agent.get("comment", "")
-    views = agent.get("views", 0) + (1 if viewer_tg_id and viewer_tg_id != agent_tg_id else 0)
-    caption = f"*{agent['name']}* ({idx + 1}/{total})  👁 {views}"
+    caption = f"*{agent['name']}* ({idx + 1}/{total})"
     if comment:
         caption += f"\n_{comment}_"
 
@@ -380,7 +520,6 @@ async def fav_agent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE)
         new_action = "add"
         new_label = "🤍 В избранное"
 
-    # Update just the favorite button
     kb = query.message.reply_markup
     new_rows = []
     for row in kb.inline_keyboard:
@@ -425,9 +564,7 @@ async def agent_done_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 
 def build_free_conversation() -> ConversationHandler:
-    # IMPORTANT: button text "✋ Стать агентом" must be an entry_point so PTB tracks
-    # conversation state correctly. Calling free_handler from message_url_handler directly
-    # does NOT register state in the ConversationHandler.
+    _keep = CallbackQueryHandler(mc_keep_cb, pattern=r"^mc_keep:")
     return ConversationHandler(
         entry_points=[
             CommandHandler("free", free_handler),
@@ -435,19 +572,22 @@ def build_free_conversation() -> ConversationHandler:
             CallbackQueryHandler(no_url_entry,       pattern=r"^no_url$"),
         ],
         states={
-            MC_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, mc_name)],
-            MC_POS:  [CallbackQueryHandler(mc_pos, pattern=r"^mc_pos:")],
-            MC_AGE:  [MessageHandler(filters.TEXT & ~filters.COMMAND, mc_age)],
+            MC_NAME: [_keep, MessageHandler(filters.TEXT & ~filters.COMMAND, mc_name)],
+            MC_POS:  [_keep, CallbackQueryHandler(mc_pos, pattern=r"^mc_pos:")],
+            MC_AGE:  [_keep, MessageHandler(filters.TEXT & ~filters.COMMAND, mc_age)],
             MC_TEAM: [
+                _keep,
                 CallbackQueryHandler(mc_team_none, pattern=r"^mc_team:none$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, mc_team_text),
             ],
-            MC_LEAGUE: [CallbackQueryHandler(mc_league, pattern=r"^mc_league:")],
+            MC_LEAGUE: [_keep, CallbackQueryHandler(mc_league, pattern=r"^mc_league:")],
             MC_EXP: [
+                _keep,
                 CallbackQueryHandler(mc_exp_none, pattern=r"^mc_exp:none$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, mc_exp_text),
             ],
             MC_COMMENT: [
+                _keep,
                 CallbackQueryHandler(mc_comment_skip, pattern=r"^mc_comment:skip$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, mc_comment_text),
             ],

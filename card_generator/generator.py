@@ -71,15 +71,35 @@ def _clip_text(draw: ImageDraw.Draw, text: str,
 def _draw_person_silhouette(draw: ImageDraw.Draw, cx: int, cy: int, color: tuple) -> None:
     """Draw a simple person icon (head + shoulders) centered at (cx, cy)."""
     # Head
-    hr = 12
-    draw.ellipse([(cx - hr, cy - 26), (cx + hr, cy - 2)], fill=color)
+    hr = 18
+    draw.ellipse([(cx - hr, cy - 36), (cx + hr, cy - 2)], fill=color)
     # Shoulders — upper half of a wide ellipse
-    sw, sh = 22, 14
-    draw.pieslice([(cx - sw, cy + 4), (cx + sw, cy + 4 + sh * 2)], 180, 360, fill=color)
+    sw, sh = 32, 20
+    draw.pieslice([(cx - sw, cy + 6), (cx + sw, cy + 6 + sh * 2)], 180, 360, fill=color)
+
+
+def _paste_avatar(img: Image.Image, avatar_bytes: bytes, ax: int, ay: int, ar: int) -> None:
+    """Paste a circular-cropped photo into the card image."""
+    size = ar * 2
+    try:
+        av = Image.open(io.BytesIO(avatar_bytes)).convert("RGB")
+        # Crop to square from center before resizing for better quality
+        w, h = av.size
+        side = min(w, h)
+        left, top = (w - side) // 2, (h - side) // 2
+        av = av.crop((left, top, left + side, top + side))
+        av = av.resize((size * 2, size * 2), Image.LANCZOS)
+        av = av.resize((size, size), Image.LANCZOS)
+        mask = Image.new("L", (size, size), 0)
+        ImageDraw.Draw(mask).ellipse([(0, 0), (size - 1, size - 1)], fill=255)
+        img.paste(av, (ax - ar, ay - ar), mask)
+    except Exception:
+        pass
 
 
 def _draw_player_header(draw: ImageDraw.Draw, profile: PlayerProfile,
-                        accent: tuple) -> None:
+                        accent: tuple, img: Image.Image = None,
+                        avatar_bytes: bytes = None) -> None:
     _gradient(draw, 0, 0, W, HEADER_H, C_HEADER_TOP, C_BG)
 
     # Corner accent triangle
@@ -88,11 +108,14 @@ def _draw_player_header(draw: ImageDraw.Draw, profile: PlayerProfile,
     draw.polygon(tri, fill=shade)
 
     # Avatar
-    ax, ay, ar = 76, 77, 50
+    ax, ay, ar = 85, 77, 68
     draw.ellipse([(ax - ar - 4, ay - ar - 4), (ax + ar + 4, ay + ar + 4)], fill=accent)
     draw.ellipse([(ax - ar - 1, ay - ar - 1), (ax + ar + 1, ay + ar + 1)], fill=C_STATS_BG)
     draw.ellipse([(ax - ar, ay - ar), (ax + ar, ay + ar)], fill=C_AV_BG)
-    _draw_person_silhouette(draw, ax, ay, accent)
+    if avatar_bytes and img is not None:
+        _paste_avatar(img, avatar_bytes, ax, ay, ar)
+    else:
+        _draw_person_silhouette(draw, ax, ay, accent)
 
     # Text
     tx = ax + ar + 18
@@ -184,12 +207,12 @@ def _draw_footer(draw: ImageDraw.Draw, profile: PlayerProfile,
         draw.text((W - (bbox[2] - bbox[0]) - 16, fy + 34), src_txt, fill=C_MUTED, font=fr)
 
 
-def draw_card(profile: PlayerProfile) -> bytes:
+def draw_card(profile: PlayerProfile, avatar_bytes: bytes = None) -> bytes:
     img = Image.new("RGB", (W, H), C_BG)
     draw = ImageDraw.Draw(img)
     accent = C_GOLD_ACC if profile.is_free_agent else C_BLUE_ACC
 
-    _draw_player_header(draw, profile, accent)
+    _draw_player_header(draw, profile, accent, img=img, avatar_bytes=avatar_bytes)
 
     sy = HEADER_H
     if profile.lfl_url:

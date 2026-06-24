@@ -2,6 +2,25 @@ import json
 import aiosqlite
 
 
+async def save_help_request(db_path: str, tg_id: int, username: str, full_name: str, text: str) -> None:
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute(
+            "INSERT INTO help_requests (tg_id, username, full_name, text) VALUES (?, ?, ?, ?)",
+            (tg_id, username or "", full_name or "", text or ""),
+        )
+        await conn.commit()
+
+
+async def get_help_requests(db_path: str, limit: int = 50) -> list[dict]:
+    async with aiosqlite.connect(db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        cur = await conn.execute(
+            "SELECT * FROM help_requests ORDER BY created_at DESC LIMIT ?", (limit,)
+        )
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
 async def log_message(db_path: str, tg_id: int, username: str, full_name: str, text: str) -> None:
     async with aiosqlite.connect(db_path) as conn:
         await conn.execute(
@@ -233,8 +252,90 @@ async def is_favorite(db_path: str, tg_id: int, target_type: str, target_tg_id: 
 
 # ── Broadcast ─────────────────────────────────────────────────────────────────
 
+async def get_active_agents_for_notification(db_path: str, league: str) -> list[dict]:
+    """Active players whose division matches the league, or lfl.ru players if league is ЛФЛ."""
+    async with aiosqlite.connect(db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        cur = await conn.execute("""
+            SELECT tg_id, name, position, division, lfl_url
+            FROM free_agents
+            WHERE active=1 AND (
+                division = ?
+                OR (lfl_url != '' AND ? IN ('ЛФЛ', 'lfl', 'лфл', 'ЛФЛ Москва'))
+            )
+        """, (league, league))
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def get_active_teams_for_notification(db_path: str, position: str, league: str) -> list[dict]:
+    """Active teams whose positions list includes the player's position and league matches."""
+    async with aiosqlite.connect(db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        cur = await conn.execute("SELECT * FROM teams WHERE active=1")
+        rows = await cur.fetchall()
+    results = []
+    for row in rows:
+        t = dict(row)
+        t["positions"] = json.loads(t["positions"])
+        t["districts"] = json.loads(t["districts"])
+        if position and position not in t["positions"]:
+            continue
+        if league and t["league"] != league:
+            continue
+        results.append(t)
+    return results
+
+
+async def create_broadcast(db_path: str) -> int:
+    async with aiosqlite.connect(db_path) as conn:
+        cur = await conn.execute("INSERT INTO broadcasts DEFAULT VALUES")
+        broadcast_id = cur.lastrowid
+        await conn.commit()
+    return broadcast_id
+
+
+async def save_broadcast_message(db_path: str, broadcast_id: int, chat_id: int, message_id: int) -> None:
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute(
+            "INSERT INTO broadcast_messages (broadcast_id, chat_id, message_id) VALUES (?,?,?)",
+            (broadcast_id, chat_id, message_id),
+        )
+        await conn.commit()
+
+
+async def get_broadcast_messages(db_path: str, broadcast_id: int) -> list[dict]:
+    async with aiosqlite.connect(db_path) as conn:
+        conn.row_factory = aiosqlite.Row
+        cur = await conn.execute(
+            "SELECT chat_id, message_id FROM broadcast_messages WHERE broadcast_id=?",
+            (broadcast_id,),
+        )
+        rows = await cur.fetchall()
+    return [dict(r) for r in rows]
+
+
+async def upsert_user(db_path: str, tg_id: int, username: str, full_name: str) -> None:
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("""
+            INSERT INTO users (tg_id, username, full_name)
+            VALUES (?, ?, ?)
+            ON CONFLICT(tg_id) DO UPDATE SET
+                username=excluded.username,
+                full_name=excluded.full_name,
+                last_seen=CURRENT_TIMESTAMP
+        """, (tg_id, username or "", full_name or ""))
+        await conn.commit()
+
+
 async def get_all_tg_ids(db_path: str) -> list[int]:
     async with aiosqlite.connect(db_path) as conn:
-        cur = await conn.execute("SELECT DISTINCT tg_id FROM free_agents")
+        cur = await conn.execute("""
+            SELECT tg_id FROM users
+            UNION
+            SELECT DISTINCT tg_id FROM free_agents
+            UNION
+            SELECT DISTINCT tg_id FROM bot_messages
+        """)
         rows = await cur.fetchall()
     return [r[0] for r in rows]

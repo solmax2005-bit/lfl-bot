@@ -225,6 +225,14 @@ async def _save_team(
         await via_query.edit_message_text(text)
     else:
         await update.message.reply_text(text)
+
+    # Notify matching players in background
+    from handlers.notifications import notify_players_new_team
+    import asyncio
+    asyncio.ensure_future(notify_players_new_team(
+        context.bot, tg_id, rt["name"], rt["league"], rt.get("positions", [])
+    ))
+
     return ConversationHandler.END
 
 
@@ -235,7 +243,7 @@ async def rt_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 
 _MENU_TEXTS = [
     "🃏 Создать карточку", "🔍 Найти агентов",
-    "🪪 Моя карточка", "⚽ Найти команду", "👥 Моя команда", "⭐ Избранное",
+    "🪪 Моя карточка", "⚽ Найти команду", "👥 Моя команда", "⭐ Избранное", "🆘 Помощь",
 ]
 
 
@@ -267,9 +275,15 @@ async def _menu_escape(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     elif text == "⭐ Избранное":
         from handlers.search import favorites_handler
         await favorites_handler(update, context)
+    elif text == "🆘 Помощь":
+        from handlers.card import help_button_handler
+        await help_button_handler(update, context)
     else:
         from handlers.card import MAIN_KEYBOARD
-        await update.message.reply_text("Нажми ещё раз.", reply_markup=MAIN_KEYBOARD)
+        await update.message.reply_text(
+            "Что-то пошло не так. Нажми /start чтобы вернуться в главное меню.",
+            reply_markup=MAIN_KEYBOARD,
+        )
     return ConversationHandler.END
 
 

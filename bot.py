@@ -2,8 +2,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
+import time
 import logging
 import httpx
+from collections import defaultdict
 
 logging.basicConfig(
     level=logging.INFO,
@@ -23,10 +25,11 @@ httpx.AsyncClient.__init__ = _httpx_no_proxy_init
 
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
-    CallbackQueryHandler, filters,
+    CallbackQueryHandler, filters, ApplicationHandlerStop,
 )
 from handlers.card import (
-    start_handler, help_handler, mycard_handler,
+    start_handler, help_handler, help_button_handler, help_contact_callback,
+    mycard_handler,
     message_url_handler, delete_card_callback,
     build_multi_card_conversation, multi_done_callback, become_agent_callback,
     skip_exp_callback, skip_comment_callback, looking_callback,
@@ -43,9 +46,37 @@ from handlers.teams import (
     find_teams_handler, find_teams_callback,
     delete_team_callback, apply_team_callback,
 )
-from handlers.admin import admin_list_handler, admin_deactivate_handler, broadcast_handler
+from handlers.notifications import notif_show_agent_callback, notif_show_team_callback
+from handlers.admin import (
+    admin_list_handler, admin_deactivate_handler,
+    broadcast_handler, broadcast_delete_handler,
+    admin_panel_handler, admin_broadcasts_callback, admin_del_broadcast_callback,
+    admin_broadcast_start_callback, handle_broadcast_input,
+)
 from database.db import init_db
 from database.queries import log_message
+
+_spam: dict[int, list[float]] = defaultdict(list)
+_RATE_LIMIT = 10   # max messages per window
+_RATE_WINDOW = 10  # seconds
+
+
+async def _rate_limit(update, context):
+    if not update.message or not update.effective_user:
+        return
+    admin_id = os.getenv("ADMIN_TG_ID", "")
+    uid = update.effective_user.id
+    if admin_id and str(uid) == admin_id:
+        return  # never rate-limit admin
+    now = time.time()
+    _spam[uid] = [t for t in _spam[uid] if now - t < _RATE_WINDOW]
+    if len(_spam[uid]) >= _RATE_LIMIT:
+        try:
+            await update.message.reply_text("⏳ Слишком много сообщений. Подожди немного.")
+        except Exception:
+            pass
+        raise ApplicationHandlerStop()
+    _spam[uid].append(now)
 
 
 async def _log_all_messages(update, context):
@@ -75,6 +106,9 @@ async def post_init(app):
 def main() -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     app = Application.builder().token(token).post_init(post_init).build()
+
+    # Rate limit (group=-2 stops all further processing if triggered)
+    app.add_handler(MessageHandler(filters.ALL, _rate_limit), group=-2)
 
     # Log all messages (runs silently before all other handlers)
     app.add_handler(MessageHandler(filters.TEXT, _log_all_messages), group=-1)
@@ -108,14 +142,22 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(skip_comment_callback,  pattern=r"^skip_comment$"))
     app.add_handler(CallbackQueryHandler(looking_callback,       pattern=r"^looking:"))
     app.add_handler(CallbackQueryHandler(refresh_card_callback,  pattern=r"^refresh_card$"))
-    app.add_handler(CallbackQueryHandler(upload_photo_callback,  pattern=r"^upload_photo$"))
+    app.add_handler(CallbackQueryHandler(upload_photo_callback,       pattern=r"^upload_photo$"))
+    app.add_handler(CallbackQueryHandler(help_contact_callback,        pattern=r"^help_contact$"))
+    app.add_handler(CallbackQueryHandler(notif_show_agent_callback,   pattern=r"^notif_agent:"))
+    app.add_handler(CallbackQueryHandler(notif_show_team_callback,    pattern=r"^notif_team:"))
     app.add_handler(CallbackQueryHandler(fav_agent_callback,     pattern=r"^fav_agent:"))
     app.add_handler(CallbackQueryHandler(apply_team_callback,    pattern=r"^apply_team:"))
 
     # Admin
-    app.add_handler(CommandHandler("admin_list",   admin_list_handler))
-    app.add_handler(CommandHandler("admin_clear",  admin_deactivate_handler))
-    app.add_handler(CommandHandler("broadcast",    broadcast_handler))
+    app.add_handler(CommandHandler("admin_list",       admin_list_handler))
+    app.add_handler(CommandHandler("admin_clear",      admin_deactivate_handler))
+    app.add_handler(CommandHandler("admin",            admin_panel_handler))
+    app.add_handler(CommandHandler("broadcast",        broadcast_handler))
+    app.add_handler(CommandHandler("broadcast_delete", broadcast_delete_handler))
+    app.add_handler(CallbackQueryHandler(admin_broadcast_start_callback, pattern=r"^admin_broadcast_start$"))
+    app.add_handler(CallbackQueryHandler(admin_broadcasts_callback,     pattern=r"^admin_broadcasts$"))
+    app.add_handler(CallbackQueryHandler(admin_del_broadcast_callback,  pattern=r"^admin_del_broadcast:"))
 
     # Photo upload
     app.add_handler(MessageHandler(filters.PHOTO, photo_message_handler))
