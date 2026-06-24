@@ -221,6 +221,7 @@ def draw_team_card(team: dict) -> bytes:
     fn = _font("Roboto-Bold.ttf", 24)
     fs = _font("Roboto-Regular.ttf", 13)
     fb_sm = _font("Roboto-Bold.ttf", 13)
+    nm = team.get("name", "—")
 
     name = _clip_text(draw, nm, fn, W - tx - 20)
     draw.text((tx, 18), name, fill=C_WHITE, font=fn)
