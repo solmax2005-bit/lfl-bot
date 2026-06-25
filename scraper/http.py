@@ -22,8 +22,14 @@ async def _do_fetch(fetch_url: str, headers: dict, timeout: float, encoding: str
 async def fetch_html(url: str, timeout: float = 15.0, encoding: str | None = None) -> str:
     proxy_url = os.getenv("PROXY_URL", "")
     scraperapi_key = os.getenv("SCRAPERAPI_KEY", "")
+    cf_worker = os.getenv("CF_WORKER_URL", "")
 
-    if proxy_url:
+    if cf_worker and "lfl.ru" in url:
+        from urllib.parse import quote
+        fetch_url = f"{cf_worker}?secret=lfl_proxy_2024&url={quote(url, safe='')}"
+        headers = {}
+        proxy = None
+    elif proxy_url:
         fetch_url = url
         headers = _DEFAULT_HEADERS
         proxy = proxy_url
