@@ -244,8 +244,8 @@ function contactLink(contact, name) {
   return null;
 }
 
-async function api(path) {
-  const r = await fetch(API + path);
+async function api(path, method = 'GET') {
+  const r = await fetch(API + path, {method});
   return r.json();
 }
 
@@ -451,7 +451,7 @@ async function loadProfile() {
       return;
     }
     const newActive = isActive ? 0 : 1;
-    await api('/api/agent/toggle-free?tg_id=' + userId + '&active=' + newActive);
+    await api('/api/agent/toggle-free?tg_id=' + userId + '&active=' + newActive, 'POST');
     tg.showAlert(newActive ? 'Ты в поиске команды! Тебя видят тренеры.' : 'Ты убран из поиска.');
     loadProfile();
   });
