@@ -110,11 +110,16 @@ async def parse_lfl_player(url: str) -> PlayerProfile:
     last_exc: Exception | None = None
     for attempt in range(2):
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=8.0) as client:
                 response = await client.get(url, headers=_HEADERS, follow_redirects=True)
                 response.raise_for_status()
                 response.encoding = "windows-1251"
                 return _parse_lfl_html(response.text, url)
+        except httpx.TimeoutException as exc:
+            raise ValueError(
+                "lfl.ru не отвечает — сайт блокирует запросы с нашего сервера.\n"
+                "Создай карточку вручную нажав кнопку ниже."
+            ) from exc
         except httpx.HTTPError as exc:
             last_exc = exc
         except Exception as exc:
