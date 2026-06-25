@@ -3,6 +3,7 @@ from datetime import date
 import httpx
 from bs4 import BeautifulSoup
 from scraper.models import PlayerProfile
+from scraper.http import fetch_html
 
 
 def _extract_age(birthdate_str: str) -> int:
@@ -107,21 +108,14 @@ _HEADERS = {
 
 
 async def parse_lfl_player(url: str) -> PlayerProfile:
-    last_exc: Exception | None = None
-    for attempt in range(2):
-        try:
-            async with httpx.AsyncClient(timeout=8.0) as client:
-                response = await client.get(url, headers=_HEADERS, follow_redirects=True)
-                response.raise_for_status()
-                response.encoding = "windows-1251"
-                return _parse_lfl_html(response.text, url)
-        except httpx.TimeoutException as exc:
-            raise ValueError(
-                "lfl.ru не отвечает — сайт блокирует запросы с нашего сервера.\n"
-                "Создай карточку вручную нажав кнопку ниже."
-            ) from exc
-        except httpx.HTTPError as exc:
-            last_exc = exc
-        except Exception as exc:
-            raise ValueError(f"Ошибка парсера ЛФЛ: {type(exc).__name__}: {exc}") from exc
-    raise ValueError(f"Не удалось загрузить профиль ЛФЛ: {type(last_exc).__name__}") from last_exc
+    try:
+        html = await fetch_html(url, timeout=20.0, encoding="windows-1251")
+        return _parse_lfl_html(html, url)
+    except httpx.TimeoutException as exc:
+        raise ValueError(
+            "lfl.ru не отвечает — попробуй позже или создай карточку вручную."
+        ) from exc
+    except httpx.HTTPError as exc:
+        raise ValueError(f"Не удалось загрузить профиль ЛФЛ: {type(exc).__name__}") from exc
+    except Exception as exc:
+        raise ValueError(f"Ошибка парсера ЛФЛ: {type(exc).__name__}: {exc}") from exc

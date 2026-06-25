@@ -3,6 +3,7 @@ from datetime import date
 import httpx
 from bs4 import BeautifulSoup
 from scraper.models import PlayerProfile
+from scraper.http import fetch_html
 
 
 def _extract_age(birthdate_str: str) -> int:
@@ -85,11 +86,8 @@ def _parse_fleague_html(html: str, url: str) -> PlayerProfile:
 
 
 async def parse_fleague_player(url: str) -> PlayerProfile:
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; LFLBot/1.0)"}
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
-            return _parse_fleague_html(response.text, url)
+        html = await fetch_html(url, timeout=20.0)
+        return _parse_fleague_html(html, url)
     except httpx.HTTPError as exc:
         raise ValueError(f"Не удалось загрузить профиль F-лиги: {exc}") from exc
