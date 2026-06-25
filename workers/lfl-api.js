@@ -1,4 +1,4 @@
-const BACKEND = "http://5.42.105.13:8000";
+const BACKEND = "http://8454829-lb807508.twc1.net:8000";
 
 export default {
   async fetch(request) {
