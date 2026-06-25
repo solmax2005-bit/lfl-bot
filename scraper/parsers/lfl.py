@@ -109,7 +109,7 @@ _HEADERS = {
 
 async def parse_lfl_player(url: str) -> PlayerProfile:
     try:
-        html = await fetch_html(url, timeout=20.0, encoding="windows-1251")
+        html = await fetch_html(url, timeout=45.0, encoding="windows-1251")
         return _parse_lfl_html(html, url)
     except httpx.TimeoutException as exc:
         raise ValueError(
