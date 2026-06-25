@@ -125,7 +125,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
   position:fixed;left:0;right:0;bottom:0;
   background:rgba(255,255,255,.95);backdrop-filter:blur(14px);
   border-top:1px solid var(--line);
-  display:grid;grid-template-columns:repeat(4,1fr);
+  display:grid;grid-template-columns:repeat(3,1fr);
   padding:10px 8px calc(10px + env(safe-area-inset-bottom));
   z-index:100;
 }
@@ -169,25 +169,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
   </div>
 </div>
 
-<!-- SCREEN 3: Таблица -->
-<div class="screen" id="s-table">
-  <div class="pad2">
-    <div class="h-big">Высший дивизион</div>
-    <div class="h-sub">Тур 18 · сезон 2025/26</div>
-    <div style="margin-top:16px;background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:4px 16px;box-shadow:var(--shadow)">
-      <div class="trow head"><span>#</span><span>Команда</span><span class="c">И</span><span class="c">Р</span><span class="pt">О</span></div>
-      <div class="trow top1"><span class="rk">1</span><span class="tm"><span class="lg">СМ</span><span>Спарта Москва</span></span><span class="c">17</span><span class="c">+38</span><span class="pt">45</span></div>
-      <div class="trow top2"><span class="rk">2</span><span class="tm"><span class="lg">АН</span><span>Анжи</span></span><span class="c">17</span><span class="c">+24</span><span class="pt">39</span></div>
-      <div class="trow top3"><span class="rk">3</span><span class="tm"><span class="lg">КО</span><span>Корсары</span></span><span class="c">17</span><span class="c">+19</span><span class="pt">35</span></div>
-      <div class="trow"><span class="rk">4</span><span class="tm"><span class="lg">ВД</span><span>Видное</span></span><span class="c">17</span><span class="c">+11</span><span class="pt">31</span></div>
-      <div class="trow"><span class="rk">5</span><span class="tm"><span class="lg">ДЮ</span><span>Динамо ЮГ</span></span><span class="c">17</span><span class="c">+6</span><span class="pt">28</span></div>
-      <div class="trow"><span class="rk">6</span><span class="tm"><span class="lg">НГ</span><span>Нагатино</span></span><span class="c">17</span><span class="c">-2</span><span class="pt">22</span></div>
-    </div>
-    <div class="promo"><i></i> Топ-3 выходят в Лигу Чемпионов ЛФЛ</div>
-  </div>
-</div>
-
-<!-- SCREEN 4: Профиль -->
+<!-- SCREEN 3: Профиль (бывший 4) -->
 <div class="screen" id="s-profile">
   <div class="pad2">
     <div class="pcard" id="profile-card"></div>
@@ -203,9 +185,6 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
   </button>
   <button data-t="s-search">
     <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4-4" stroke-linecap="round"/></svg>Поиск
-  </button>
-  <button data-t="s-table">
-    <svg viewBox="0 0 24 24"><path d="M5 20V10M12 20V4M19 20v-7" stroke-linecap="round"/></svg>Таблица
   </button>
   <button data-t="s-profile">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M5 20c1.5-4 12.5-4 14 0" stroke-linecap="round"/></svg>Профиль
