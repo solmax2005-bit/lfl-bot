@@ -1,7 +1,6 @@
+import asyncio
 import os
 import httpx
-
-_SCRAPER_KEY = os.getenv("SCRAPERAPI_KEY", "")
 
 _DEFAULT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -11,18 +10,31 @@ _DEFAULT_HEADERS = {
 }
 
 
-async def fetch_html(url: str, timeout: float = 20.0, encoding: str | None = None) -> str:
-    key = os.getenv("SCRAPERAPI_KEY", "")
-    if key:
-        fetch_url = f"https://api.scraperapi.com?api_key={key}&url={url}"
-        headers = {}
-    else:
-        fetch_url = url
-        headers = _DEFAULT_HEADERS
-
+async def _do_fetch(fetch_url: str, headers: dict, timeout: float, encoding: str | None) -> str:
     async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
         response = await client.get(fetch_url, headers=headers)
         response.raise_for_status()
         if encoding:
             response.encoding = encoding
         return response.text
+
+
+async def fetch_html(url: str, timeout: float = 15.0, encoding: str | None = None) -> str:
+    key = os.getenv("SCRAPERAPI_KEY", "")
+    if key:
+        fetch_url = (
+            f"https://api.scraperapi.com"
+            f"?api_key={key}&url={url}&country_code=ru&timeout=12000"
+        )
+        headers = {}
+    else:
+        fetch_url = url
+        headers = _DEFAULT_HEADERS
+
+    try:
+        return await asyncio.wait_for(
+            _do_fetch(fetch_url, headers, timeout, encoding),
+            timeout=timeout,
+        )
+    except asyncio.TimeoutError as exc:
+        raise httpx.TimeoutException(f"Timeout after {timeout}s") from exc
