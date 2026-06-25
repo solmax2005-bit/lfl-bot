@@ -10,8 +10,8 @@ _DEFAULT_HEADERS = {
 }
 
 
-async def _do_fetch(fetch_url: str, headers: dict, timeout: float, encoding: str | None) -> str:
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+async def _do_fetch(fetch_url: str, headers: dict, timeout: float, encoding: str | None, proxy: str | None = None) -> str:
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, proxy=proxy) as client:
         response = await client.get(fetch_url, headers=headers)
         response.raise_for_status()
         if encoding:
@@ -20,20 +20,28 @@ async def _do_fetch(fetch_url: str, headers: dict, timeout: float, encoding: str
 
 
 async def fetch_html(url: str, timeout: float = 15.0, encoding: str | None = None) -> str:
-    key = os.getenv("SCRAPERAPI_KEY", "")
-    if key:
+    proxy_url = os.getenv("PROXY_URL", "")
+    scraperapi_key = os.getenv("SCRAPERAPI_KEY", "")
+
+    if proxy_url:
+        fetch_url = url
+        headers = _DEFAULT_HEADERS
+        proxy = proxy_url
+    elif scraperapi_key:
         fetch_url = (
             f"https://api.scraperapi.com"
-            f"?api_key={key}&url={url}&country_code=ru&timeout=12000"
+            f"?api_key={scraperapi_key}&url={url}&country_code=ru&timeout=12000"
         )
         headers = {}
+        proxy = None
     else:
         fetch_url = url
         headers = _DEFAULT_HEADERS
+        proxy = None
 
     try:
         return await asyncio.wait_for(
-            _do_fetch(fetch_url, headers, timeout, encoding),
+            _do_fetch(fetch_url, headers, timeout, encoding, proxy),
             timeout=timeout,
         )
     except asyncio.TimeoutError as exc:
