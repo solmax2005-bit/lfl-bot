@@ -14,7 +14,7 @@ from scraper.parsers.registry import detect_url, detect_and_parse
 from scraper.models import PlayerProfile
 from card_generator.generator import draw_card
 from database.db import init_db
-from database.queries import get_agent_by_tg_id, upsert_agent, activate_agent, update_looking, save_photo, upsert_user
+from database.queries import get_agent_by_tg_id, upsert_agent, activate_agent, update_looking, save_photo, upsert_user, incr_stat
 
 AWAITING_EXTRA_URL = 10
 
@@ -55,6 +55,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         username=user.username or "",
         full_name=f"{user.first_name or ''} {user.last_name or ''}".strip(),
     )
+    await incr_stat(DB_PATH, "bot_starts")
     name = user.first_name or "игрок"
     await update.message.reply_text(
         f"Привет, {name}!\n\nЯ ЛФЛ Агент — твой помощник в лиге.\n\n"

@@ -86,7 +86,7 @@ from handlers.admin import (
     broadcast_handler, broadcast_delete_handler,
     admin_panel_handler, admin_broadcasts_callback, admin_del_broadcast_callback,
     admin_broadcast_start_callback, handle_broadcast_input,
-    admin_panel_back_callback,
+    admin_panel_back_callback, admin_stats_callback,
     admin_agents_callback, admin_toggle_agent_callback, admin_del_agent_callback,
     admin_teams_callback, admin_toggle_team_callback, admin_del_team_callback,
 )
@@ -208,6 +208,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(admin_broadcasts_callback,     pattern=r"^admin_broadcasts$"))
     app.add_handler(CallbackQueryHandler(admin_del_broadcast_callback,  pattern=r"^admin_del_broadcast:"))
     app.add_handler(CallbackQueryHandler(admin_panel_back_callback,     pattern=r"^admin_panel_back$"))
+    app.add_handler(CallbackQueryHandler(admin_stats_callback,          pattern=r"^admin_stats$"))
     app.add_handler(CallbackQueryHandler(admin_agents_callback,         pattern=r"^admin_agents:"))
     app.add_handler(CallbackQueryHandler(admin_toggle_agent_callback,   pattern=r"^admin_toggle_agent:"))
     app.add_handler(CallbackQueryHandler(admin_del_agent_callback,      pattern=r"^admin_del_agent:"))

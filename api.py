@@ -27,6 +27,7 @@ from database.queries import (
     upsert_team, get_teams, get_team_by_tg_id, deactivate_team, save_team_photo,
     add_favorite, remove_favorite, is_favorite, get_favorites,
     get_active_teams_for_notification, get_active_agents_for_notification,
+    incr_stat,
 )
 
 DB_PATH = os.getenv("DB_PATH", "lfl_bot.db")
@@ -147,6 +148,13 @@ async def _card_response(tg_id: int) -> dict:
 async def root():
     # no-store so Telegram clients always fetch the latest Mini App (avoid stale cache)
     return FileResponse("webapp/index.html", headers={"Cache-Control": "no-store, must-revalidate"})
+
+
+@app.post("/api/visit")
+async def visit():
+    # Called once when the Mini App loads — counts opens for admin stats.
+    await incr_stat(DB_PATH, "miniapp_opens")
+    return {"ok": True}
 
 
 @app.get("/api/me")

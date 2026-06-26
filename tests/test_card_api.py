@@ -385,5 +385,18 @@ def test_team_photo_requires_team():
     assert client.post("/api/team/photo", json={"init_data": raw, "image": _png_b64()}).json()["ok"] is False
 
 
+def test_visit_and_stats():
+    from database.queries import get_stats
+    client.post("/api/visit")
+    client.post("/api/visit")
+    raw = make_init_data({"id": 500, "username": "s"})
+    client.post("/api/card/save", json={
+        "init_data": raw, "name": "S", "position": "Вратарь", "age": 25, "division": "ЛФЛ",
+    })
+    s = asyncio.run(get_stats(api.DB_PATH))
+    assert s["miniapp_opens"] >= 2
+    assert s["cards"] >= 1
+
+
 async def _async_return(val):
     return val

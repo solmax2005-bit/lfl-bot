@@ -8,7 +8,7 @@ from database.queries import (
     create_broadcast, save_broadcast_message, get_broadcast_messages,
     get_all_agents_admin, get_all_teams_admin,
     delete_agent_permanently, delete_team_permanently,
-    deactivate_team,
+    deactivate_team, get_stats,
 )
 
 DB_PATH = os.getenv("DB_PATH", "lfl_bot.db")
@@ -114,6 +114,7 @@ async def admin_panel_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     if not _is_admin(update):
         return
     kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Статистика",          callback_data="admin_stats")],
         [InlineKeyboardButton("📢 Сделать рассылку",    callback_data="admin_broadcast_start")],
         [InlineKeyboardButton("📋 Последние рассылки",  callback_data="admin_broadcasts")],
         [InlineKeyboardButton("👤 Карточки игроков",    callback_data="admin_agents:0")],
@@ -129,12 +130,36 @@ async def admin_panel_back_callback(update: Update, context: ContextTypes.DEFAUL
         return
     await query.answer()
     kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 Статистика",          callback_data="admin_stats")],
         [InlineKeyboardButton("📢 Сделать рассылку",    callback_data="admin_broadcast_start")],
         [InlineKeyboardButton("📋 Последние рассылки",  callback_data="admin_broadcasts")],
         [InlineKeyboardButton("👤 Карточки игроков",    callback_data="admin_agents:0")],
         [InlineKeyboardButton("🏟 Карточки команд",     callback_data="admin_teams:0")],
     ])
     await query.edit_message_text("Панель администратора:", reply_markup=kb)
+
+
+async def admin_stats_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    if query.from_user.id != ADMIN_TG_ID:
+        await query.answer("Нет доступа.", show_alert=True)
+        return
+    await query.answer()
+    await init_db(DB_PATH)
+    s = await get_stats(DB_PATH)
+    text = (
+        "📊 *Статистика*\n\n"
+        f"🚀 Запусков бота (/start): *{s['bot_starts']}*\n"
+        f"👥 Уникальных пользователей: *{s['users']}*\n"
+        f"📲 Открытий Mini App: *{s['miniapp_opens']}*\n"
+        f"🪪 Создано карточек: *{s['cards']}*\n"
+        f"🏟 Создано команд: *{s['teams']}*"
+    )
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("🔄 Обновить", callback_data="admin_stats")],
+        [InlineKeyboardButton("◀️ В меню", callback_data="admin_panel_back")],
+    ])
+    await query.edit_message_text(text, parse_mode="Markdown", reply_markup=kb)
 
 
 async def admin_agents_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

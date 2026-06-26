@@ -916,6 +916,7 @@ function esc(s) {
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
+fetch(API + '/api/visit', {method: 'POST'}).catch(() => {});  // count Mini App opens
 loadCard();
 </script>
 </body>

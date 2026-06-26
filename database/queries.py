@@ -389,3 +389,35 @@ async def get_all_tg_ids(db_path: str) -> list[int]:
         """)
         rows = await cur.fetchall()
     return [r[0] for r in rows]
+
+
+# ── Stats ─────────────────────────────────────────────────────────────────────
+
+async def incr_stat(db_path: str, key: str, by: int = 1) -> None:
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute(
+            "INSERT INTO stats (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = value + ?",
+            (key, by, by),
+        )
+        await conn.commit()
+
+
+async def get_stats(db_path: str) -> dict:
+    """All counters + table totals, in one dict."""
+    async with aiosqlite.connect(db_path) as conn:
+        cur = await conn.execute("SELECT key, value FROM stats")
+        counters = {k: v for k, v in await cur.fetchall()}
+        cur = await conn.execute("SELECT COUNT(*) FROM users")
+        users = (await cur.fetchone())[0]
+        cur = await conn.execute("SELECT COUNT(*) FROM free_agents")
+        cards = (await cur.fetchone())[0]
+        cur = await conn.execute("SELECT COUNT(*) FROM teams")
+        teams = (await cur.fetchone())[0]
+    return {
+        "bot_starts": counters.get("bot_starts", 0),
+        "miniapp_opens": counters.get("miniapp_opens", 0),
+        "users": users,
+        "cards": cards,
+        "teams": teams,
+    }
