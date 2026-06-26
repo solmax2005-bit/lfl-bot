@@ -27,6 +27,7 @@ async def init_db(db_path: str = "lfl_bot.db") -> None:
             "ALTER TABLE free_agents ADD COLUMN extra_clubs TEXT DEFAULT ''",
             "ALTER TABLE free_agents ADD COLUMN views INTEGER DEFAULT 0",
             "ALTER TABLE free_agents ADD COLUMN photo_file_id TEXT DEFAULT ''",
+            "ALTER TABLE free_agents ADD COLUMN photo TEXT DEFAULT ''",
         ]:
             try:
                 await conn.execute(col_sql)

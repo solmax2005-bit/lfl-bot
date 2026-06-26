@@ -237,6 +237,15 @@ async def save_photo(db_path: str, tg_id: int, file_id: str) -> None:
         await conn.commit()
 
 
+async def save_card_photo(db_path: str, tg_id: int, photo: str) -> None:
+    """Web photo URL/path for the Mini App card."""
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute(
+            "UPDATE free_agents SET photo=? WHERE tg_id=?", (photo, tg_id)
+        )
+        await conn.commit()
+
+
 # ── Favorites ─────────────────────────────────────────────────────────────────
 
 async def add_favorite(db_path: str, tg_id: int, target_type: str, target_tg_id: int) -> bool:

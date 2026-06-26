@@ -2,8 +2,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
+import io
 import json
 import hmac
+import base64
 import hashlib
 import time
 import asyncio
@@ -11,15 +13,17 @@ from urllib.parse import parse_qsl
 
 from fastapi import FastAPI, Query, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from PIL import Image
 import aiosqlite
 import httpx
 
 from scraper.parsers.registry import detect_and_parse
 from database.queries import (
     upsert_agent, get_agent_by_tg_id, deactivate_agent, activate_agent,
-    update_looking, delete_agent_permanently,
+    update_looking, delete_agent_permanently, save_card_photo,
     upsert_team, get_teams, get_team_by_tg_id, deactivate_team,
     add_favorite, remove_favorite, is_favorite, get_favorites,
     get_active_teams_for_notification, get_active_agents_for_notification,
@@ -33,6 +37,10 @@ LEAGUES = {"ЛФЛ", "AFL", "Pari Amateur", "F-лига", ""}
 
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+PHOTOS_DIR = "photos"
+os.makedirs(PHOTOS_DIR, exist_ok=True)
+app.mount("/photos", StaticFiles(directory=PHOTOS_DIR), name="photos")
 
 
 # ── Telegram WebApp initData validation ──────────────────────────────────────
@@ -108,6 +116,7 @@ def _parse_profile(data: dict) -> dict:
         "lfl_url": data.get("lfl_url") or "",
         "active": data.get("active", 0),
         "looking": data.get("looking", 0),
+        "photo": data.get("photo") or "",
         "contact": data.get("contact") or "",
         "comment": data.get("comment") or "",
         "division": data.get("division") or "",
@@ -277,6 +286,75 @@ async def card_delete(req: InitReq):
     user = verify_init_data(req.init_data)
     await delete_agent_permanently(DB_PATH, user["tg_id"])
     return {"ok": True}
+
+
+class PhotoReq(BaseModel):
+    init_data: str
+    image: str  # base64 (optionally a data: URL)
+
+
+@app.post("/api/card/photo")
+async def card_photo(req: PhotoReq):
+    user = verify_init_data(req.init_data)
+    tg_id = user["tg_id"]
+    existing = await get_agent_by_tg_id(DB_PATH, tg_id)
+    if not existing:
+        return {"ok": False, "error": "Сначала создай карточку"}
+    data = req.image.strip()
+    if data.startswith("data:") and "," in data:
+        data = data.split(",", 1)[1]
+    try:
+        raw = base64.b64decode(data)
+    except Exception:
+        return {"ok": False, "error": "Не удалось прочитать изображение"}
+    if len(raw) > 8 * 1024 * 1024:
+        return {"ok": False, "error": "Фото слишком большое (макс 8 МБ)"}
+    try:
+        img = Image.open(io.BytesIO(raw)).convert("RGB")
+    except Exception:
+        return {"ok": False, "error": "Это не изображение"}
+    # center-crop to square, resize to 400x400
+    w, h = img.size
+    side = min(w, h)
+    left, top = (w - side) // 2, (h - side) // 2
+    img = img.crop((left, top, left + side, top + side)).resize((400, 400), Image.LANCZOS)
+    img.save(os.path.join(PHOTOS_DIR, f"{tg_id}.jpg"), "JPEG", quality=85)
+    await save_card_photo(DB_PATH, tg_id, f"/photos/{tg_id}.jpg?t={int(time.time())}")
+    return await _card_response(tg_id)
+
+
+@app.post("/api/card/refresh")
+async def card_refresh(req: InitReq):
+    user = verify_init_data(req.init_data)
+    tg_id = user["tg_id"]
+    existing = await get_agent_by_tg_id(DB_PATH, tg_id)
+    if not existing or not existing.get("lfl_url"):
+        return {"ok": False, "error": "У карточки нет ссылки для обновления"}
+    try:
+        fresh = await detect_and_parse(existing["lfl_url"])
+    except Exception as e:
+        return {"ok": False, "error": str(e) or "Не удалось обновить"}
+    if not fresh:
+        return {"ok": False, "error": "Не удалось загрузить данные с сайта"}
+    # keep extra clubs the user added manually
+    extra = [c.strip() for c in (existing.get("extra_clubs") or "").split(",") if c.strip()]
+    seen = set(fresh.career_clubs)
+    for c in extra:
+        if c not in seen:
+            fresh.career_clubs.append(c)
+            seen.add(c)
+    await upsert_agent(
+        DB_PATH, tg_id,
+        name=fresh.name, position=fresh.position, division=existing.get("division", ""),
+        contact=existing.get("contact", str(tg_id)), comment=existing.get("comment", ""),
+        lfl_url=existing["lfl_url"],
+        experience=" · ".join(fresh.career_clubs),
+        current_team="" if fresh.is_free_agent else fresh.current_club,
+        age=fresh.age, profile_json=_profile_to_json(fresh),
+        active=existing.get("active", 0), looking=existing.get("looking", 0),
+        extra_clubs=existing.get("extra_clubs", ""),
+    )
+    return await _card_response(tg_id)
 
 
 # ── Teams (Phase 2) ──────────────────────────────────────────────────────────

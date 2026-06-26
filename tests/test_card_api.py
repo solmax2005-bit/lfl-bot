@@ -1,7 +1,10 @@
 import asyncio
+import base64
 import hashlib
 import hmac
+import io
 import json
+import os
 import time
 from types import SimpleNamespace
 from urllib.parse import urlencode
@@ -35,8 +38,11 @@ def make_init_data(user: dict, token: str = TEST_TOKEN, auth_date: int | None = 
 def _setup(tmp_path, monkeypatch):
     db = str(tmp_path / "t.db")
     asyncio.run(init_db(db))
+    phdir = tmp_path / "photos"
+    phdir.mkdir()
     monkeypatch.setattr(api, "DB_PATH", db)
     monkeypatch.setattr(api, "BOT_TOKEN", TEST_TOKEN)
+    monkeypatch.setattr(api, "PHOTOS_DIR", str(phdir))
     yield
 
 
@@ -301,3 +307,66 @@ def test_team_save_notifies_players_once(monkeypatch):
     client.post("/api/team/save", json={"init_data": raw, "name": "T", "league": "ЛФЛ", "positions": ["Нападающий"]})
     client.post("/api/team/save", json={"init_data": raw, "name": "T2", "league": "ЛФЛ", "positions": ["Нападающий"]})
     assert count["n"] == 1
+
+
+# ── Photo + refresh (2026-06-27) ──────────────────────────────────────────────
+
+def _png_b64(w=50, h=80):
+    from PIL import Image as PILImage
+    buf = io.BytesIO()
+    PILImage.new("RGB", (w, h), (10, 20, 30)).save(buf, "PNG")
+    return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def test_card_photo_upload():
+    raw = make_init_data({"id": 400, "username": "ph"})
+    client.post("/api/card/save", json={
+        "init_data": raw, "name": "Фото", "position": "Вратарь", "age": 25, "division": "ЛФЛ",
+    })
+    r = client.post("/api/card/photo", json={"init_data": raw, "image": _png_b64()})
+    body = r.json()
+    assert body["ok"] is True
+    assert body["profile"]["photo"].startswith("/photos/400.jpg")
+    assert os.path.exists(os.path.join(api.PHOTOS_DIR, "400.jpg"))
+
+
+def test_card_photo_rejects_non_image():
+    raw = make_init_data({"id": 403, "username": "x"})
+    client.post("/api/card/save", json={
+        "init_data": raw, "name": "X", "position": "Вратарь", "age": 25, "division": "ЛФЛ",
+    })
+    bad = "data:image/png;base64," + base64.b64encode(b"not an image").decode()
+    r = client.post("/api/card/photo", json={"init_data": raw, "image": bad})
+    assert r.json()["ok"] is False
+
+
+def test_card_refresh(monkeypatch):
+    raw = make_init_data({"id": 401, "username": "rf"})
+    old = SimpleNamespace(
+        name="Старый", position="Защитник", lfl_url="https://lfl.ru/person1?player_id=1",
+        career_clubs=["Клуб"], is_free_agent=True, current_club="Клуб", age=20,
+        goals=1, matches=5, assists=0, yellow_cards=0, red_cards=0, debut_year=2020,
+        birthdate="", club_id=0, experience="",
+    )
+    monkeypatch.setattr(api, "detect_and_parse", lambda url: _async_return(old))
+    client.post("/api/card/import", json={"init_data": raw, "url": old.lfl_url})
+
+    new = SimpleNamespace(**{**old.__dict__, "name": "Новый", "goals": 9, "matches": 15, "assists": 3})
+    monkeypatch.setattr(api, "detect_and_parse", lambda url: _async_return(new))
+    r = client.post("/api/card/refresh", json={"init_data": raw})
+    body = r.json()
+    assert body["ok"] is True
+    assert body["profile"]["name"] == "Новый"
+    assert body["profile"]["goals"] == 9
+
+
+def test_card_refresh_no_url():
+    raw = make_init_data({"id": 402})
+    client.post("/api/card/save", json={
+        "init_data": raw, "name": "Ручной", "position": "Вратарь", "age": 22, "division": "ЛФЛ",
+    })
+    assert client.post("/api/card/refresh", json={"init_data": raw}).json()["ok"] is False
+
+
+async def _async_return(val):
+    return val

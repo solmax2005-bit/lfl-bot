@@ -179,6 +179,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
 .tfilters{display:flex;gap:8px;flex-wrap:wrap;padding:14px 0 6px;}
 .tfilters select{flex:1;min-width:130px;font-family:'Inter';font-size:13.5px;font-weight:600;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 12px;outline:none;}
 .tfilters select:focus{border-color:var(--blue);}
+.avatar img,.av img{width:100%;height:100%;object-fit:cover;border-radius:inherit;display:block;}
 </style>
 </head>
 <body>
@@ -343,10 +344,42 @@ function cardActionsHtml(d) {
         ${active ? '🙈 Убрать из поиска агентов' : '📣 Добавить в поиск агентов'}
       </button>
       <div class="btn-row">
+        <button class="btn ghost sm" onclick="pickPhoto()">📷 Фото</button>
+        ${d.lfl_url ? `<button class="btn ghost sm" onclick="refreshCard(this)">🔄 Обновить с сайта</button>` : ''}
+      </div>
+      <div class="btn-row">
         <button class="btn ghost sm" onclick="showManual()">✏️ Редактировать</button>
         <button class="btn danger sm" onclick="deleteCard()">🗑 Удалить</button>
       </div>
     </div>`;
+}
+
+function pickPhoto() {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'image/*';
+  inp.onchange = () => {
+    const file = inp.files && inp.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const res = await apiPost('/api/card/photo', {image: reader.result});
+      if (res.ok) { tg.HapticFeedback?.notificationOccurred?.('success'); loadCard(); }
+      else if (res.error) tg.showAlert(res.error);
+    };
+    reader.readAsDataURL(file);
+  };
+  inp.click();
+}
+
+async function refreshCard(btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Обновляю...'; }
+  const res = await apiPost('/api/card/refresh', {});
+  if (res.ok) { tg.HapticFeedback?.notificationOccurred?.('success'); loadCard(); }
+  else {
+    if (btn) { btn.disabled = false; btn.textContent = '🔄 Обновить с сайта'; }
+    if (res.error) tg.showAlert(res.error);
+  }
 }
 
 function showImport() {
@@ -479,7 +512,7 @@ function renderCard(d, el) {
         ${isActive ? '<span class="chip live"><span class="dot"></span>В поиске</span>' : ''}
       </div>
       <div class="hero-id">
-        <div class="avatar">${ini}</div>
+        <div class="avatar">${d.photo ? `<img src="${esc(d.photo)}" alt="">` : ini}</div>
         <div>
           <h1>${esc(d.name)}</h1>
           <div class="pos"><b>${esc(d.position)}</b>${d.age ? ' · ' + d.age + ' лет' : ''}</div>
@@ -544,7 +577,7 @@ function renderAgentCard(a) {
   const gm = a.matches > 0 ? `${a.goals} гол · ${a.matches} игр` : '';
   return `
     <div class="agent" style="cursor:pointer" onclick="showAgentDetail(${a.tg_id})">
-      <div class="av">${ini}</div>
+      <div class="av">${a.photo ? `<img src="${esc(a.photo)}" alt="">` : ini}</div>
       <div class="info">
         <div class="nm">${esc(a.name)} <span class="free"></span></div>
         <div class="meta">${esc(a.position)}${a.age ? ' · ' + a.age + ' лет' : ''}${gm ? ' · ' + gm : ''}</div>
