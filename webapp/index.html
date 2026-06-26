@@ -174,6 +174,8 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
 .seg button{flex:1;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--muted);font-weight:700;font-size:13.5px;cursor:pointer;font-family:'Inter';}
 .seg button.on{background:var(--blue);border-color:var(--blue);color:#fff;}
 .av{width:44px;height:44px;border-radius:13px;flex:none;background:linear-gradient(145deg,#dce9ff,#bcd6ff);display:flex;align-items:center;justify-content:center;font-family:'Archivo';font-weight:700;color:var(--blue-d);font-size:15px;}
+.heart{flex:none;background:none;border:none;font-size:20px;cursor:pointer;padding:4px;line-height:1;-webkit-tap-highlight-color:transparent;}
+.heart:active{transform:scale(.85);}
 </style>
 </head>
 <body>
@@ -194,6 +196,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
       <div class="fchip" data-pos="Полузащитник">Полузащитник</div>
       <div class="fchip" data-pos="Защитник">Защитник</div>
       <div class="fchip" data-pos="Вратарь">Вратарь</div>
+      <div class="fchip" data-pos="__fav__">⭐ Избранное</div>
     </div>
     <div class="agents-list" id="agents-list"><div class="loader"></div></div>
   </div>
@@ -508,34 +511,63 @@ function renderCard(d, el) {
 // ─── Search screen ────────────────────────────────────────────────────────────
 
 let currentPos = '';
+let favSet = new Set();
 
 async function loadAgents(pos) {
   currentPos = pos;
   const list = document.getElementById('agents-list');
   const count = document.getElementById('agents-count');
   list.innerHTML = '<div class="loader"></div>';
-  const agents = await api('/api/agents?position=' + encodeURIComponent(pos));
-  count.textContent = agents.length + ' игрок' + plural(agents.length, '', 'а', 'ов') + ' ищут команду';
 
+  // Refresh favorites set so hearts render correctly.
+  if (userId) {
+    const favs = await api('/api/favorites?tg_id=' + userId);
+    favSet = new Set(favs.map(f => f.tg_id));
+    if (pos === '__fav__') {
+      count.textContent = favs.length + ' в избранном';
+      list.innerHTML = favs.length
+        ? favs.map(renderAgentCard).join('')
+        : '<div class="empty-card"><div class="ico">⭐</div><h2>Избранное пусто</h2><p>Добавляй агентов кнопкой 🤍 в поиске</p></div>';
+      return;
+    }
+  }
+
+  const agents = await api('/api/agents?position=' + encodeURIComponent(pos === '__fav__' ? '' : pos));
+  count.textContent = agents.length + ' игрок' + plural(agents.length, '', 'а', 'ов') + ' ищут команду';
   if (agents.length === 0) {
     list.innerHTML = '<div class="empty-card"><div class="ico">🔍</div><h2>Никого нет</h2><p>Агентов по этой позиции пока нет</p></div>';
     return;
   }
+  list.innerHTML = agents.map(renderAgentCard).join('');
+}
 
-  list.innerHTML = agents.map(a => {
-    const ini = initials(a.name);
-    const link = contactLink(a.contact, a.name);
-    const gm = a.matches > 0 ? `${a.goals} гол · ${a.matches} игр` : '';
-    return `
-      <div class="agent">
-        <div class="av">${ini}</div>
-        <div class="info">
-          <div class="nm">${esc(a.name)} <span class="free"></span></div>
-          <div class="meta">${esc(a.position)}${a.age ? ' · ' + a.age + ' лет' : ''}${gm ? ' · ' + gm : ''}</div>
-        </div>
-        ${link ? `<a class="write" href="${link}" target="_blank">Написать</a>` : '<span class="write" style="opacity:.4;cursor:default">—</span>'}
-      </div>`;
-  }).join('');
+function renderAgentCard(a) {
+  const ini = initials(a.name);
+  const link = contactLink(a.contact, a.name);
+  const gm = a.matches > 0 ? `${a.goals} гол · ${a.matches} игр` : '';
+  const mine = a.tg_id === userId;
+  const isFav = favSet.has(a.tg_id);
+  return `
+    <div class="agent">
+      <div class="av">${ini}</div>
+      <div class="info">
+        <div class="nm">${esc(a.name)} <span class="free"></span></div>
+        <div class="meta">${esc(a.position)}${a.age ? ' · ' + a.age + ' лет' : ''}${gm ? ' · ' + gm : ''}</div>
+      </div>
+      ${mine ? '' : `<button class="heart" onclick="toggleFav(${a.tg_id}, this)">${isFav ? '❤️' : '🤍'}</button>`}
+      ${link ? `<a class="write" href="${link}" target="_blank">Написать</a>` : ''}
+    </div>`;
+}
+
+async function toggleFav(tgId, btn) {
+  const res = await apiPost('/api/fav/toggle', {target_tg_id: tgId});
+  if (!res.ok) return;
+  tg.HapticFeedback?.impactOccurred?.('light');
+  if (res.fav) { favSet.add(tgId); btn.textContent = '❤️'; }
+  else {
+    favSet.delete(tgId); btn.textContent = '🤍';
+    if (currentPos === '__fav__') loadAgents('__fav__');  // drop from the favorites view
+  }
 }
 
 function plural(n, one, few, many) {
@@ -549,7 +581,7 @@ function plural(n, one, few, many) {
 document.getElementById('pos-filters').addEventListener('click', e => {
   const chip = e.target.closest('.fchip');
   if (!chip) return;
-  document.querySelectorAll('.fchip').forEach(c => c.classList.remove('on'));
+  document.querySelectorAll('#pos-filters .fchip').forEach(c => c.classList.remove('on'));
   chip.classList.add('on');
   loadAgents(chip.dataset.pos || '');
 });

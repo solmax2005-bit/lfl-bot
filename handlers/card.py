@@ -3,7 +3,7 @@ import json
 import os
 import re
 from telegram import (
-    Update, ReplyKeyboardMarkup, KeyboardButton,
+    Update, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo,
     InlineKeyboardMarkup, InlineKeyboardButton,
 )
 from telegram.ext import (
@@ -29,15 +29,16 @@ async def _download_avatar(bot, file_id: str) -> bytes | None:
 
 DB_PATH = os.getenv("DB_PATH", "lfl_bot.db")
 
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://lflagent.ru/")
+
+# All features now live in the Mini App; the bot keyboard is just an opener + help.
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
-        [KeyboardButton("🃏 Создать карточку"),      KeyboardButton("🪪 Моя карточка")],
-        [KeyboardButton("🔍 Найти агентов"),          KeyboardButton("⚽ Найти команду")],
-        [KeyboardButton("🏟 Зарегистрировать команду"), KeyboardButton("👥 Моя команда")],
-        [KeyboardButton("⭐ Избранное"),               KeyboardButton("🆘 Помощь")],
+        [KeyboardButton("⚽ Открыть", web_app=WebAppInfo(url=WEBAPP_URL))],
+        [KeyboardButton("🆘 Помощь")],
     ],
     resize_keyboard=True,
-    input_field_placeholder="Выбери действие...",
+    input_field_placeholder="Открой приложение ⚽",
 )
 
 
@@ -51,7 +52,8 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     )
     name = user.first_name or "игрок"
     await update.message.reply_text(
-        f"Привет, {name}!\n\nЯ ЛФЛ Агент — твой помощник в лиге.\n\nВыбери действие 👇",
+        f"Привет, {name}!\n\nЯ ЛФЛ Агент — твой помощник в лиге.\n\n"
+        "Нажми ⚽ Открыть — там карточка игрока, поиск агентов, команды и избранное.",
         reply_markup=MAIN_KEYBOARD,
     )
 
