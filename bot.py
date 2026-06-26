@@ -27,6 +27,7 @@ from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ApplicationHandlerStop,
 )
+from telegram.request import HTTPXRequest
 from handlers.card import (
     start_handler, help_handler, help_button_handler, help_contact_callback,
     mycard_handler,
@@ -108,7 +109,8 @@ async def post_init(app):
 
 def main() -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
-    app = Application.builder().token(token).post_init(post_init).build()
+    request = HTTPXRequest(connect_timeout=30.0, read_timeout=35.0, write_timeout=30.0)
+    app = Application.builder().token(token).request(request).post_init(post_init).build()
 
     # Rate limit (group=-2 stops all further processing if triggered)
     app.add_handler(MessageHandler(filters.ALL, _rate_limit), group=-2)
@@ -179,7 +181,7 @@ def main() -> None:
     # Text / URL fallback (must be last)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_url_handler))
 
-    app.run_polling()
+    app.run_polling(timeout=20, bootstrap_retries=5, drop_pending_updates=False)
 
 
 if __name__ == "__main__":
