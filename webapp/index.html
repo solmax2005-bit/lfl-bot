@@ -302,8 +302,7 @@ let _card = null;  // last loaded card (for edit prefill)
 async function loadCard() {
   const el = document.getElementById('card-content');
   if (!userId) {
-    const dbg = `platform=${tg.platform} ver=${tg.version} initData.len=${(tg.initData || '').length} user=${tg.initDataUnsafe && tg.initDataUnsafe.user ? 'yes' : 'no'} keys=${tg.initDataUnsafe ? Object.keys(tg.initDataUnsafe).join('|') : 'none'}`;
-    el.innerHTML = `<div class="empty-card"><div class="ico">⚽</div><h2>Открой в Telegram</h2><p>Мини-апп работает только внутри Telegram</p><p style="font-size:10px;color:#aaa;word-break:break-all;margin-top:14px">${dbg}</p></div>`;
+    el.innerHTML = `<div class="empty-card"><div class="ico">⚽</div><h2>Открой через кнопку приложения</h2><p>Открой мини-апп кнопкой Меню (слева от поля ввода) или «⚽ Открыть»</p></div>`;
     return;
   }
   el.innerHTML = '<div class="loader"></div>';

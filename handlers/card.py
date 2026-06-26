@@ -31,15 +31,21 @@ DB_PATH = os.getenv("DB_PATH", "lfl_bot.db")
 
 WEBAPP_URL = os.getenv("WEBAPP_URL", "https://lflagent.ru/")
 
-# All features now live in the Mini App; the bot keyboard is just an opener + help.
+# Reply-keyboard web_app buttons DON'T pass initData on Telegram Desktop, so the
+# keyboard "Открыть" is a plain button that replies with an INLINE web_app button
+# (inline + Menu Button launches do pass initData on every platform).
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [
-        [KeyboardButton("⚽ Открыть", web_app=WebAppInfo(url=WEBAPP_URL))],
+        [KeyboardButton("⚽ Открыть")],
         [KeyboardButton("🆘 Помощь")],
     ],
     resize_keyboard=True,
     input_field_placeholder="Открой приложение ⚽",
 )
+
+_OPEN_APP_KB = InlineKeyboardMarkup([[
+    InlineKeyboardButton("⚽ Открыть приложение", web_app=WebAppInfo(url=WEBAPP_URL)),
+]])
 
 
 async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -623,7 +629,7 @@ def build_multi_card_conversation() -> ConversationHandler:
 
 
 _MENU_BUTTON_TEXTS = {
-    "🃏 Создать карточку", "🔍 Найти агентов", "🪪 Моя карточка",
+    "⚽ Открыть", "🃏 Создать карточку", "🔍 Найти агентов", "🪪 Моя карточка",
     "⚽ Найти команду", "👥 Моя команда", "⭐ Избранное", "🆘 Помощь",
 }
 
@@ -707,6 +713,10 @@ async def message_url_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
     if text == "⭐ Избранное":
         from handlers.search import favorites_handler
         await favorites_handler(update, context)
+        return
+
+    if text == "⚽ Открыть":
+        await update.message.reply_text("Открываю приложение 👇", reply_markup=_OPEN_APP_KB)
         return
 
     if text == "🆘 Помощь":
