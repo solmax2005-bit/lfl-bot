@@ -1,4 +1,4 @@
-const BACKEND = "http://8454829-lb807508.twc1.net:8000";
+const BACKEND = "https://belfast-ata-entitled-appearing.trycloudflare.com";
 
 export default {
   async fetch(request) {
