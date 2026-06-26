@@ -176,6 +176,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
 .av{width:44px;height:44px;border-radius:13px;flex:none;background:linear-gradient(145deg,#dce9ff,#bcd6ff);display:flex;align-items:center;justify-content:center;font-family:'Archivo';font-weight:700;color:var(--blue-d);font-size:15px;}
 .heart{flex:none;background:none;border:none;font-size:24px;cursor:pointer;padding:4px 6px;line-height:1;color:#ef5b6b;-webkit-tap-highlight-color:transparent;}
 .heart:active{transform:scale(.85);}
+.tfilters{display:flex;gap:8px;flex-wrap:wrap;padding:14px 0 6px;}
+.tfilters select{flex:1;min-width:130px;font-family:'Inter';font-size:13.5px;font-weight:600;color:var(--text);background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 12px;outline:none;}
+.tfilters select:focus{border-color:var(--blue);}
 </style>
 </head>
 <body>
@@ -697,6 +700,8 @@ async function loadProfile() {
 
 const TEAM_DISTRICTS = ['ЮГ', 'Юго-восток', 'Запад', 'Северо-запад', 'Север', 'Северо-Восток', 'Восток'];
 const TEAM_DIVISIONS = ['Высший', 'Первый', 'Второй', 'Третий'];
+let currentTeamLeague = '';
+let currentTeamDistrict = '';
 let currentTeamPos = '';
 let _team = null;
 
@@ -707,33 +712,54 @@ function teamContact(c) {
   return null;
 }
 
-async function loadTeams(pos) {
-  currentTeamPos = pos || '';
+async function loadTeams() {
   const el = document.getElementById('teams-content');
+  const showDistrict = currentTeamLeague === 'ЛФЛ';
   el.innerHTML = `
     <div class="pad2">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
         <div><div class="h-big">Команды</div><div class="h-sub" id="teams-count">Ищут игроков</div></div>
         <button class="btn ghost sm" style="width:auto;white-space:nowrap" onclick="showMyTeam()">👥 Моя команда</button>
       </div>
-      <div class="filters" id="team-filters">
-        ${['', 'Нападающий', 'Полузащитник', 'Защитник', 'Вратарь'].map(p =>
-          `<div class="fchip${currentTeamPos === p ? ' on' : ''}" data-pos="${p}">${p || 'Все'}</div>`).join('')}
+      <div class="tfilters">
+        <select id="tf-league" onchange="applyTeamFilters()">
+          <option value="">Все лиги</option>
+          ${LEAGUES.map(l => `<option value="${l}"${currentTeamLeague === l ? ' selected' : ''}>${l}</option>`).join('')}
+        </select>
+        ${showDistrict ? `<select id="tf-district" onchange="applyTeamFilters()">
+          <option value="">Все округа</option>
+          ${TEAM_DISTRICTS.map(d => `<option value="${d}"${currentTeamDistrict === d ? ' selected' : ''}>${d}</option>`).join('')}
+        </select>` : ''}
+        <select id="tf-pos" onchange="applyTeamFilters()">
+          <option value="">Все позиции</option>
+          ${POSITIONS.map(p => `<option value="${p}"${currentTeamPos === p ? ' selected' : ''}>${p}</option>`).join('')}
+        </select>
       </div>
       <div id="teams-list"><div class="loader"></div></div>
     </div>`;
-  document.getElementById('team-filters').addEventListener('click', e => {
-    const chip = e.target.closest('.fchip');
-    if (chip) loadTeams(chip.dataset.pos || '');
-  });
-  const teams = await api('/api/teams?position=' + encodeURIComponent(currentTeamPos));
+  const params = new URLSearchParams();
+  if (currentTeamLeague) params.set('league', currentTeamLeague);
+  if (showDistrict && currentTeamDistrict) params.set('district', currentTeamDistrict);
+  if (currentTeamPos) params.set('position', currentTeamPos);
+  const teams = await api('/api/teams?' + params.toString());
   const list = document.getElementById('teams-list');
   document.getElementById('teams-count').textContent = teams.length + ' команд' + plural(teams.length, 'а', 'ы', '');
   if (!teams.length) {
-    list.innerHTML = '<div class="empty-card"><div class="ico">🏟</div><h2>Команд нет</h2><p>По этому фильтру команды не найдены</p></div>';
+    list.innerHTML = '<div class="empty-card"><div class="ico">🏟</div><h2>Команд нет</h2><p>По этим фильтрам команды не найдены</p></div>';
     return;
   }
   list.innerHTML = teams.map(renderTeamCard).join('');
+}
+
+function applyTeamFilters() {
+  const lg = document.getElementById('tf-league');
+  const ds = document.getElementById('tf-district');
+  const ps = document.getElementById('tf-pos');
+  if (lg) currentTeamLeague = lg.value;
+  if (currentTeamLeague === 'ЛФЛ') currentTeamDistrict = ds ? ds.value : currentTeamDistrict;
+  else currentTeamDistrict = '';
+  if (ps) currentTeamPos = ps.value;
+  loadTeams();
 }
 
 function renderTeamCard(t) {
@@ -773,7 +799,7 @@ async function showMyTeam() {
   const meta = [t.league, (t.districts || []).join(', '), t.division].filter(Boolean).join(' · ');
   el.innerHTML = `
     <div class="pad2">
-      <button class="btn ghost sm" style="width:auto" onclick="loadTeams(currentTeamPos)">← К списку команд</button>
+      <button class="btn ghost sm" style="width:auto" onclick="loadTeams()">← К списку команд</button>
       <div class="card-block" style="margin-top:12px;padding:16px">
         <div style="display:flex;align-items:center;gap:12px">
           <div class="av">${initials(t.name)}</div>
@@ -820,7 +846,7 @@ function showTeamForm() {
         <textarea id="t-comment" placeholder="Условия, тренировки и т.д.">${esc(t.comment || '')}</textarea></div>
       <button class="btn primary" onclick="submitTeam()">💾 Сохранить</button>
       <div style="height:10px"></div>
-      <button class="btn ghost" onclick="${editing ? 'showMyTeam()' : 'loadTeams(currentTeamPos)'}">Отмена</button>
+      <button class="btn ghost" onclick="${editing ? 'showMyTeam()' : 'loadTeams()'}">Отмена</button>
     </div>`;
 }
 
@@ -844,7 +870,7 @@ function deleteTeam() {
   tg.showConfirm('Удалить команду?', async (ok) => {
     if (!ok) return;
     const res = await apiPost('/api/team/delete', {});
-    if (res.ok) { _team = null; loadTeams(currentTeamPos); }
+    if (res.ok) { _team = null; loadTeams(); }
   });
 }
 
@@ -864,7 +890,7 @@ function switchScreen(id) {
     loadProfile();
   }
   if (id === 's-teams') {
-    loadTeams(currentTeamPos);
+    loadTeams();
   }
 }
 
