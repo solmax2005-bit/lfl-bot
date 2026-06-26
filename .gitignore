@@ -10,3 +10,5 @@ venv/
 dist/
 build/
 .pytest_cache/
+*.log
+tunnel.log
