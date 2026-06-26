@@ -368,5 +368,22 @@ def test_card_refresh_no_url():
     assert client.post("/api/card/refresh", json={"init_data": raw}).json()["ok"] is False
 
 
+def test_team_photo_upload():
+    raw = make_init_data({"id": 410, "username": "tph"})
+    client.post("/api/team/save", json={
+        "init_data": raw, "name": "Эмблема FC", "league": "ЛФЛ", "positions": ["Вратарь"],
+    })
+    r = client.post("/api/team/photo", json={"init_data": raw, "image": _png_b64()})
+    body = r.json()
+    assert body["ok"] is True
+    assert body["team"]["photo"].startswith("/photos/team_410.jpg")
+    assert os.path.exists(os.path.join(api.PHOTOS_DIR, "team_410.jpg"))
+
+
+def test_team_photo_requires_team():
+    raw = make_init_data({"id": 411})
+    assert client.post("/api/team/photo", json={"init_data": raw, "image": _png_b64()}).json()["ok"] is False
+
+
 async def _async_return(val):
     return val

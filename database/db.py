@@ -49,6 +49,10 @@ async def init_db(db_path: str = "lfl_bot.db") -> None:
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        try:
+            await conn.execute("ALTER TABLE teams ADD COLUMN photo TEXT DEFAULT ''")
+        except Exception:
+            pass  # column already exists
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS favorites (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,

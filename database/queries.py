@@ -246,6 +246,15 @@ async def save_card_photo(db_path: str, tg_id: int, photo: str) -> None:
         await conn.commit()
 
 
+async def save_team_photo(db_path: str, tg_id: int, photo: str) -> None:
+    """Web emblem URL/path for the team card."""
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute(
+            "UPDATE teams SET photo=? WHERE tg_id=?", (photo, tg_id)
+        )
+        await conn.commit()
+
+
 # ── Favorites ─────────────────────────────────────────────────────────────────
 
 async def add_favorite(db_path: str, tg_id: int, target_type: str, target_tg_id: int) -> bool:

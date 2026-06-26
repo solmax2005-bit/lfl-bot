@@ -24,7 +24,7 @@ from scraper.parsers.registry import detect_and_parse
 from database.queries import (
     upsert_agent, get_agent_by_tg_id, deactivate_agent, activate_agent,
     update_looking, delete_agent_permanently, save_card_photo,
-    upsert_team, get_teams, get_team_by_tg_id, deactivate_team,
+    upsert_team, get_teams, get_team_by_tg_id, deactivate_team, save_team_photo,
     add_favorite, remove_favorite, is_favorite, get_favorites,
     get_active_teams_for_notification, get_active_agents_for_notification,
 )
@@ -293,32 +293,38 @@ class PhotoReq(BaseModel):
     image: str  # base64 (optionally a data: URL)
 
 
-@app.post("/api/card/photo")
-async def card_photo(req: PhotoReq):
-    user = verify_init_data(req.init_data)
-    tg_id = user["tg_id"]
-    existing = await get_agent_by_tg_id(DB_PATH, tg_id)
-    if not existing:
-        return {"ok": False, "error": "Сначала создай карточку"}
-    data = req.image.strip()
+def _save_square_image(image_b64: str, dest_path: str, size: int = 400) -> str | None:
+    """Decode base64, center-crop to square, resize, save JPEG. Returns error or None."""
+    data = (image_b64 or "").strip()
     if data.startswith("data:") and "," in data:
         data = data.split(",", 1)[1]
     try:
         raw = base64.b64decode(data)
     except Exception:
-        return {"ok": False, "error": "Не удалось прочитать изображение"}
+        return "Не удалось прочитать изображение"
     if len(raw) > 8 * 1024 * 1024:
-        return {"ok": False, "error": "Фото слишком большое (макс 8 МБ)"}
+        return "Фото слишком большое (макс 8 МБ)"
     try:
         img = Image.open(io.BytesIO(raw)).convert("RGB")
     except Exception:
-        return {"ok": False, "error": "Это не изображение"}
-    # center-crop to square, resize to 400x400
+        return "Это не изображение"
     w, h = img.size
     side = min(w, h)
     left, top = (w - side) // 2, (h - side) // 2
-    img = img.crop((left, top, left + side, top + side)).resize((400, 400), Image.LANCZOS)
-    img.save(os.path.join(PHOTOS_DIR, f"{tg_id}.jpg"), "JPEG", quality=85)
+    img = img.crop((left, top, left + side, top + side)).resize((size, size), Image.LANCZOS)
+    img.save(dest_path, "JPEG", quality=85)
+    return None
+
+
+@app.post("/api/card/photo")
+async def card_photo(req: PhotoReq):
+    user = verify_init_data(req.init_data)
+    tg_id = user["tg_id"]
+    if not await get_agent_by_tg_id(DB_PATH, tg_id):
+        return {"ok": False, "error": "Сначала создай карточку"}
+    err = _save_square_image(req.image, os.path.join(PHOTOS_DIR, f"{tg_id}.jpg"))
+    if err:
+        return {"ok": False, "error": err}
     await save_card_photo(DB_PATH, tg_id, f"/photos/{tg_id}.jpg?t={int(time.time())}")
     return await _card_response(tg_id)
 
@@ -370,6 +376,7 @@ def _team_public(t: dict) -> dict:
         "contact": t.get("contact", ""),
         "comment": t.get("comment", ""),
         "active": t.get("active", 0),
+        "photo": t.get("photo") or "",
     }
 
 
@@ -486,6 +493,20 @@ async def team_delete(req: InitReq):
     user = verify_init_data(req.init_data)
     await deactivate_team(DB_PATH, user["tg_id"])
     return {"ok": True}
+
+
+@app.post("/api/team/photo")
+async def team_photo(req: PhotoReq):
+    user = verify_init_data(req.init_data)
+    tg_id = user["tg_id"]
+    if not await get_team_by_tg_id(DB_PATH, tg_id):
+        return {"ok": False, "error": "Сначала зарегистрируй команду"}
+    err = _save_square_image(req.image, os.path.join(PHOTOS_DIR, f"team_{tg_id}.jpg"))
+    if err:
+        return {"ok": False, "error": err}
+    await save_team_photo(DB_PATH, tg_id, f"/photos/team_{tg_id}.jpg?t={int(time.time())}")
+    t = await get_team_by_tg_id(DB_PATH, tg_id)
+    return {"ok": True, "team": _team_public(t)}
 
 
 @app.post("/api/team/apply")

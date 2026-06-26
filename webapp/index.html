@@ -760,7 +760,7 @@ function renderTeamCard(t) {
   return `
     <div class="card-block" style="margin-top:10px;padding:14px 16px">
       <div style="display:flex;align-items:center;gap:12px">
-        <div class="av">${initials(t.name)}</div>
+        <div class="av">${t.photo ? `<img src="${esc(t.photo)}" alt="">` : initials(t.name)}</div>
         <div style="flex:1;min-width:0">
           <div class="nm" style="font-weight:700">${esc(t.name)}</div>
           <div class="meta" style="font-size:12px;color:var(--muted)">${esc(meta)}</div>
@@ -793,18 +793,37 @@ async function showMyTeam() {
       <button class="btn ghost sm" style="width:auto" onclick="loadTeams()">← К списку команд</button>
       <div class="card-block" style="margin-top:12px;padding:16px">
         <div style="display:flex;align-items:center;gap:12px">
-          <div class="av">${initials(t.name)}</div>
+          <div class="av">${t.photo ? `<img src="${esc(t.photo)}" alt="">` : initials(t.name)}</div>
           <div style="flex:1;min-width:0"><div class="nm" style="font-weight:700">${esc(t.name)}</div><div class="meta" style="font-size:12px;color:var(--muted)">${esc(meta)}</div></div>
         </div>
         ${(t.positions && t.positions.length) ? `<div class="meta" style="margin-top:8px;font-size:13px"><b>Ищут:</b> ${esc(t.positions.join(', '))}</div>` : ''}
         ${t.comment ? `<div class="meta" style="margin-top:4px;font-size:13px;color:var(--muted)">${esc(t.comment)}</div>` : ''}
         <div class="meta" style="margin-top:4px;font-size:13px;color:var(--muted)">Контакт: ${esc(t.contact || '—')}</div>
       </div>
+      <button class="btn ghost sm" onclick="pickTeamPhoto()">📷 Эмблема</button>
       <div class="btn-row">
         <button class="btn ghost sm" onclick="showTeamForm()">✏️ Редактировать</button>
         <button class="btn danger sm" onclick="deleteTeam()">🗑 Удалить</button>
       </div>
     </div>`;
+}
+
+function pickTeamPhoto() {
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'image/*';
+  inp.onchange = () => {
+    const file = inp.files && inp.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const res = await apiPost('/api/team/photo', {image: reader.result});
+      if (res.ok) { tg.HapticFeedback?.notificationOccurred?.('success'); showMyTeam(); }
+      else if (res.error) tg.showAlert(res.error);
+    };
+    reader.readAsDataURL(file);
+  };
+  inp.click();
 }
 
 function showTeamForm() {
