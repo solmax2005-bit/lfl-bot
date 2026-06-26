@@ -1,0 +1,164 @@
+import asyncio
+import hashlib
+import hmac
+import json
+import time
+from types import SimpleNamespace
+from urllib.parse import urlencode
+
+import pytest
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+
+import api
+from database.db import init_db
+
+TEST_TOKEN = "123456:TEST_TOKEN_ABC"
+client = TestClient(api.app)
+
+
+def make_init_data(user: dict, token: str = TEST_TOKEN, auth_date: int | None = None) -> str:
+    """Build a signed Telegram WebApp initData string, exactly как это делает Telegram."""
+    if auth_date is None:
+        auth_date = int(time.time())
+    fields = {
+        "auth_date": str(auth_date),
+        "user": json.dumps(user, separators=(",", ":"), ensure_ascii=False),
+    }
+    dcs = "\n".join(f"{k}={fields[k]}" for k in sorted(fields))
+    secret = hmac.new(b"WebAppData", token.encode(), hashlib.sha256).digest()
+    fields["hash"] = hmac.new(secret, dcs.encode(), hashlib.sha256).hexdigest()
+    return urlencode(fields)
+
+
+@pytest.fixture(autouse=True)
+def _setup(tmp_path, monkeypatch):
+    db = str(tmp_path / "t.db")
+    asyncio.run(init_db(db))
+    monkeypatch.setattr(api, "DB_PATH", db)
+    monkeypatch.setattr(api, "BOT_TOKEN", TEST_TOKEN)
+    yield
+
+
+# ── initData validation (security core) ──────────────────────────────────────
+
+def test_verify_valid():
+    out = api.verify_init_data(make_init_data({"id": 42, "username": "bob"}))
+    assert out["tg_id"] == 42
+    assert out["username"] == "bob"
+
+
+def test_verify_bad_signature():
+    raw = make_init_data({"id": 42}, token="wrong:token")
+    with pytest.raises(HTTPException) as e:
+        api.verify_init_data(raw)
+    assert e.value.status_code == 403
+
+
+def test_verify_expired():
+    raw = make_init_data({"id": 42}, auth_date=int(time.time()) - 100_000)
+    with pytest.raises(HTTPException) as e:
+        api.verify_init_data(raw)
+    assert e.value.status_code == 403
+
+
+def test_verify_empty():
+    with pytest.raises(HTTPException):
+        api.verify_init_data("")
+
+
+# ── card/save ─────────────────────────────────────────────────────────────────
+
+def test_save_creates_card():
+    raw = make_init_data({"id": 7, "username": "joe"})
+    r = client.post("/api/card/save", json={
+        "init_data": raw, "name": "Иван", "position": "Нападающий",
+        "age": 25, "division": "ЛФЛ", "current_team": "Спартак",
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["profile"]["found"] is True
+    assert body["profile"]["name"] == "Иван"
+    assert body["profile"]["position"] == "Нападающий"
+
+
+def test_save_rejects_bad_age():
+    raw = make_init_data({"id": 7})
+    r = client.post("/api/card/save", json={
+        "init_data": raw, "name": "X", "position": "Нападающий", "age": 5,
+    })
+    assert r.json()["ok"] is False
+
+
+def test_save_rejects_bad_position():
+    raw = make_init_data({"id": 7})
+    r = client.post("/api/card/save", json={
+        "init_data": raw, "name": "X", "position": "Тренер", "age": 25,
+    })
+    assert r.json()["ok"] is False
+
+
+def test_save_rejects_forged_init_data():
+    r = client.post("/api/card/save", json={
+        "init_data": "user=%7B%22id%22%3A1%7D&hash=deadbeef",
+        "name": "X", "position": "Нападающий", "age": 25,
+    })
+    assert r.status_code == 403
+
+
+# ── card/status + delete ────────────────────────────────────────────────────
+
+def test_status_toggles_flags():
+    raw = make_init_data({"id": 9, "username": "k"})
+    client.post("/api/card/save", json={
+        "init_data": raw, "name": "A", "position": "Вратарь", "age": 30, "division": "ЛФЛ",
+    })
+    r = client.post("/api/card/status", json={"init_data": raw, "active": 1, "looking": 1})
+    prof = r.json()["profile"]
+    assert prof["active"] == 1
+    assert prof["looking"] == 1
+
+
+def test_delete_removes_card():
+    raw = make_init_data({"id": 10, "username": "d"})
+    client.post("/api/card/save", json={
+        "init_data": raw, "name": "B", "position": "Защитник", "age": 22, "division": "ЛФЛ",
+    })
+    r = client.post("/api/card/delete", json={"init_data": raw})
+    assert r.json()["ok"] is True
+    me = client.get("/api/me", params={"tg_id": 10}).json()
+    assert me["found"] is False
+
+
+# ── card/import (parser mocked) ───────────────────────────────────────────────
+
+def test_import_saves_parsed_profile(monkeypatch):
+    fake = SimpleNamespace(
+        name="Пётр", position="Защитник", lfl_url="https://lfl.ru/person1?player_id=1",
+        career_clubs=["Спартак", "Зенит"], is_free_agent=True, current_club="Спартак",
+        age=28, goals=3, matches=20, assists=5, yellow_cards=2, red_cards=0,
+        debut_year=2019, birthdate="", club_id=0, experience="",
+    )
+
+    async def fake_parse(url):
+        return fake
+
+    monkeypatch.setattr(api, "detect_and_parse", fake_parse)
+    raw = make_init_data({"id": 11, "username": "p"})
+    r = client.post("/api/card/import", json={"init_data": raw, "url": "https://lfl.ru/person1?player_id=1"})
+    body = r.json()
+    assert body["ok"] is True
+    assert body["profile"]["name"] == "Пётр"
+    assert body["profile"]["goals"] == 3
+    assert body["profile"]["active"] == 0  # imported cards start hidden
+
+
+def test_import_unrecognized_url(monkeypatch):
+    async def fake_parse(url):
+        return None
+
+    monkeypatch.setattr(api, "detect_and_parse", fake_parse)
+    raw = make_init_data({"id": 12})
+    r = client.post("/api/card/import", json={"init_data": raw, "url": "https://example.com"})
+    assert r.json()["ok"] is False
