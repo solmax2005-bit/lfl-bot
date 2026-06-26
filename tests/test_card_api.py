@@ -224,7 +224,7 @@ def test_team_me_and_delete():
 def test_team_apply_notifies_captain(monkeypatch):
     sent = {}
 
-    async def fake_send(chat_id, text):
+    async def fake_send(chat_id, text, parse_mode=None, reply_markup=None):
         sent["chat_id"] = chat_id
         sent["text"] = text
 
@@ -234,3 +234,70 @@ def test_team_apply_notifies_captain(monkeypatch):
     assert r.json()["ok"] is True
     assert sent["chat_id"] == 999
     assert "Игорь" in sent["text"]
+
+
+# ── Favorites + notifications (Phase 3) ───────────────────────────────────────
+
+def test_fav_toggle_and_list():
+    raw_target = make_init_data({"id": 300, "username": "tgt"})
+    client.post("/api/card/save", json={
+        "init_data": raw_target, "name": "Цель", "position": "Нападающий", "age": 25, "division": "ЛФЛ",
+    })
+    raw_viewer = make_init_data({"id": 301, "username": "viewer"})
+    r = client.post("/api/fav/toggle", json={"init_data": raw_viewer, "target_tg_id": 300})
+    assert r.json() == {"ok": True, "fav": True}
+    favs = client.get("/api/favorites", params={"tg_id": 301}).json()
+    assert any(f["tg_id"] == 300 for f in favs)
+    r2 = client.post("/api/fav/toggle", json={"init_data": raw_viewer, "target_tg_id": 300})
+    assert r2.json()["fav"] is False
+    assert client.get("/api/favorites", params={"tg_id": 301}).json() == []
+
+
+def test_fav_rejects_forged():
+    r = client.post("/api/fav/toggle", json={"init_data": "bad", "target_tg_id": 1})
+    assert r.status_code == 403
+
+
+def test_status_activation_notifies_teams(monkeypatch):
+    called = {}
+
+    async def fake_notify(agent_tg_id, name, pos, league):
+        called["args"] = (agent_tg_id, name, pos, league)
+
+    monkeypatch.setattr(api, "_notify_teams_new_player", fake_notify)
+    raw = make_init_data({"id": 310, "username": "p"})
+    client.post("/api/card/save", json={
+        "init_data": raw, "name": "Игрок", "position": "Защитник", "age": 24, "division": "ЛФЛ",
+    })
+    client.post("/api/card/status", json={"init_data": raw, "active": 1})
+    assert called.get("args") is not None
+    assert called["args"][0] == 310
+
+
+def test_status_no_double_notify(monkeypatch):
+    count = {"n": 0}
+
+    async def fake_notify(*a):
+        count["n"] += 1
+
+    monkeypatch.setattr(api, "_notify_teams_new_player", fake_notify)
+    raw = make_init_data({"id": 311})
+    client.post("/api/card/save", json={
+        "init_data": raw, "name": "P", "position": "Вратарь", "age": 24, "division": "ЛФЛ",
+    })
+    client.post("/api/card/status", json={"init_data": raw, "active": 1})
+    client.post("/api/card/status", json={"init_data": raw, "active": 1})
+    assert count["n"] == 1
+
+
+def test_team_save_notifies_players_once(monkeypatch):
+    count = {"n": 0}
+
+    async def fake_notify(*a):
+        count["n"] += 1
+
+    monkeypatch.setattr(api, "_notify_players_new_team", fake_notify)
+    raw = make_init_data({"id": 320, "username": "cap"})
+    client.post("/api/team/save", json={"init_data": raw, "name": "T", "league": "ЛФЛ", "positions": ["Нападающий"]})
+    client.post("/api/team/save", json={"init_data": raw, "name": "T2", "league": "ЛФЛ", "positions": ["Нападающий"]})
+    assert count["n"] == 1

@@ -6,9 +6,10 @@ import json
 import hmac
 import hashlib
 import time
+import asyncio
 from urllib.parse import parse_qsl
 
-from fastapi import FastAPI, Query, HTTPException
+from fastapi import FastAPI, Query, HTTPException, BackgroundTasks
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -20,6 +21,8 @@ from database.queries import (
     upsert_agent, get_agent_by_tg_id, deactivate_agent, activate_agent,
     update_looking, delete_agent_permanently,
     upsert_team, get_teams, get_team_by_tg_id, deactivate_team,
+    add_favorite, remove_favorite, is_favorite, get_favorites,
+    get_active_teams_for_notification, get_active_agents_for_notification,
 )
 
 DB_PATH = os.getenv("DB_PATH", "lfl_bot.db")
@@ -244,12 +247,13 @@ async def card_save(req: SaveReq):
 
 
 @app.post("/api/card/status")
-async def card_status(req: StatusReq):
+async def card_status(req: StatusReq, background: BackgroundTasks):
     user = verify_init_data(req.init_data)
     tg_id = user["tg_id"]
     existing = await get_agent_by_tg_id(DB_PATH, tg_id)
     if not existing:
         return {"ok": False, "error": "Сначала создай карточку"}
+    was_active = existing.get("active", 0)
     if req.active is not None:
         if req.active:
             await activate_agent(DB_PATH, tg_id)
@@ -257,6 +261,13 @@ async def card_status(req: StatusReq):
             await deactivate_agent(DB_PATH, tg_id)
     if req.looking is not None:
         await update_looking(DB_PATH, tg_id, 1 if req.looking else 0)
+    # Notify matching teams when the player just became searchable.
+    if req.active == 1 and not was_active:
+        background.add_task(
+            _notify_teams_new_player, tg_id,
+            existing.get("name", ""), existing.get("position", ""),
+            existing.get("division") or "ЛФЛ",
+        )
     return await _card_response(tg_id)
 
 
@@ -283,17 +294,47 @@ def _team_public(t: dict) -> dict:
     }
 
 
-async def _send_telegram(chat_id: int, text: str) -> None:
+async def _send_telegram(chat_id: int, text: str, parse_mode: str | None = None, reply_markup: dict | None = None) -> None:
     if not BOT_TOKEN:
         return
+    payload = {"chat_id": chat_id, "text": text}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
     try:
         async with httpx.AsyncClient(timeout=10.0) as c:
-            await c.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                json={"chat_id": chat_id, "text": text},
-            )
+            await c.post(f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage", json=payload)
     except Exception:
         pass
+
+
+# Background auto-notifications (mirror handlers/notifications.py; buttons handled by the bot).
+async def _notify_teams_new_player(agent_tg_id: int, agent_name: str, position: str, league: str) -> None:
+    teams = await get_active_teams_for_notification(DB_PATH, position=position, league=league)
+    kb = {"inline_keyboard": [[{"text": "👀 Показать карточку", "callback_data": f"notif_agent:{agent_tg_id}"}]]}
+    for team in teams:
+        if team["tg_id"] == agent_tg_id:
+            continue
+        await _send_telegram(
+            team["tg_id"], f"🔍 Появился новый свободный агент!\n\n*{agent_name}* — {position}",
+            parse_mode="Markdown", reply_markup=kb,
+        )
+        await asyncio.sleep(0.05)
+
+
+async def _notify_players_new_team(team_tg_id: int, team_name: str, league: str, positions: list) -> None:
+    agents = await get_active_agents_for_notification(DB_PATH, league=league)
+    pos_str = ", ".join(positions) if positions else "любая"
+    kb = {"inline_keyboard": [[{"text": "👀 Показать карточку", "callback_data": f"notif_team:{team_tg_id}"}]]}
+    for agent in agents:
+        if agent["tg_id"] == team_tg_id:
+            continue
+        await _send_telegram(
+            agent["tg_id"], f"🏟 Появилась новая команда!\n\n*{team_name}* — {league}\nИщут: {pos_str}",
+            parse_mode="Markdown", reply_markup=kb,
+        )
+        await asyncio.sleep(0.05)
 
 
 class TeamSaveReq(BaseModel):
@@ -333,7 +374,7 @@ async def api_team_me(tg_id: int = Query(...)):
 
 
 @app.post("/api/team/save")
-async def team_save(req: TeamSaveReq):
+async def team_save(req: TeamSaveReq, background: BackgroundTasks):
     user = verify_init_data(req.init_data)
     tg_id = user["tg_id"]
     if not req.name.strip():
@@ -343,6 +384,8 @@ async def team_save(req: TeamSaveReq):
     positions = [p for p in req.positions if p in POSITIONS]
     if not positions:
         return {"ok": False, "error": "Выбери хотя бы одну нужную позицию"}
+    existing = await get_team_by_tg_id(DB_PATH, tg_id)
+    was_active = bool(existing and existing.get("active"))
     contact = req.contact.strip() or (f"@{user['username']}" if user.get("username") else str(tg_id))
     await upsert_team(
         DB_PATH, tg_id,
@@ -351,6 +394,11 @@ async def team_save(req: TeamSaveReq):
         positions=positions, contact=contact, comment=req.comment.strip(),
     )
     t = await get_team_by_tg_id(DB_PATH, tg_id)
+    # Notify matching players only on first registration (not on every edit).
+    if not was_active:
+        background.add_task(
+            _notify_players_new_team, tg_id, t["name"], t["league"], t.get("positions", []),
+        )
     return {"ok": True, "team": _team_public(t)}
 
 
@@ -372,6 +420,35 @@ async def team_apply(req: ApplyReq):
         f"Напиши игроку напрямую чтобы договориться.",
     )
     return {"ok": True}
+
+
+# ── Favorites (Phase 3) ───────────────────────────────────────────────────────
+
+class FavReq(BaseModel):
+    init_data: str
+    target_tg_id: int
+
+
+@app.post("/api/fav/toggle")
+async def fav_toggle(req: FavReq):
+    user = verify_init_data(req.init_data)
+    viewer = user["tg_id"]
+    if await is_favorite(DB_PATH, viewer, "agent", req.target_tg_id):
+        await remove_favorite(DB_PATH, viewer, "agent", req.target_tg_id)
+        return {"ok": True, "fav": False}
+    await add_favorite(DB_PATH, viewer, "agent", req.target_tg_id)
+    return {"ok": True, "fav": True}
+
+
+@app.get("/api/favorites")
+async def api_favorites(tg_id: int = Query(...)):
+    favs = await get_favorites(DB_PATH, tg_id, "agent")
+    out = []
+    for f in favs:
+        a = await get_agent_by_tg_id(DB_PATH, f["target_tg_id"])
+        if a:
+            out.append(_parse_profile(a))
+    return out
 
 
 # Backward-compat alias for the old Mini App profile toggle.
