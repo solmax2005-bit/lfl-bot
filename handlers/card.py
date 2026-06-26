@@ -35,14 +35,13 @@ WEBAPP_URL = os.getenv("WEBAPP_URL", "https://lflagent.ru/")
 # keyboard "Открыть" is a plain button that replies with an INLINE web_app button
 # (inline + Menu Button launches do pass initData on every platform).
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
-    [
-        [KeyboardButton("⚽ Открыть")],
-        [KeyboardButton("🆘 Помощь")],
-    ],
+    [[KeyboardButton("🆘 Помощь")]],
     resize_keyboard=True,
-    input_field_placeholder="Открой приложение ⚽",
+    input_field_placeholder="Открой приложение кнопкой Меню ⚽",
 )
 
+# Inline web_app button — launches with initData on every platform (incl. Desktop),
+# unlike a reply-keyboard web_app button. Used in /start and help.
 _OPEN_APP_KB = InlineKeyboardMarkup([[
     InlineKeyboardButton("⚽ Открыть приложение", web_app=WebAppInfo(url=WEBAPP_URL)),
 ]])
@@ -59,13 +58,18 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     name = user.first_name or "игрок"
     await update.message.reply_text(
         f"Привет, {name}!\n\nЯ ЛФЛ Агент — твой помощник в лиге.\n\n"
-        "Нажми ⚽ Открыть — там карточка игрока, поиск агентов, команды и избранное.",
+        "📲 *Как открыть приложение:* нажми кнопку *Меню* (☰ слева от поля ввода) "
+        "или кнопку ниже 👇\n\nВнутри — карточка игрока, поиск агентов, команды и избранное.",
+        parse_mode="Markdown",
         reply_markup=MAIN_KEYBOARD,
     )
+    await update.message.reply_text("👇 Открыть приложение:", reply_markup=_OPEN_APP_KB)
 
 
 HELP_TEXT = (
     "🤖 *ЛФЛ Агент — Справка*\n\n"
+    "📲 *Как открыть приложение:* кнопка *Меню* (☰ слева от поля ввода) или кнопка "
+    "«⚽ Открыть приложение» ниже. Все функции — внутри приложения.\n\n"
     "👤 *Карточка игрока*\n"
     "• 🃏 Создать карточку — добавь ссылку с lfl.ru, afl.ru или f-league.ru, или заполни вручную\n"
     "• 🪪 Моя карточка — просмотр, редактирование, фото\n"
@@ -87,16 +91,18 @@ HELP_TEXT = (
 
 
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✉️ Написать администратору", callback_data="help_contact"),
-    ]])
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚽ Открыть приложение", web_app=WebAppInfo(url=WEBAPP_URL))],
+        [InlineKeyboardButton("✉️ Написать администратору", callback_data="help_contact")],
+    ])
     await update.message.reply_text(HELP_TEXT, parse_mode="Markdown", reply_markup=kb)
 
 
 async def help_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✉️ Написать администратору", callback_data="help_contact"),
-    ]])
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("⚽ Открыть приложение", web_app=WebAppInfo(url=WEBAPP_URL))],
+        [InlineKeyboardButton("✉️ Написать администратору", callback_data="help_contact")],
+    ])
     await update.message.reply_text(HELP_TEXT, parse_mode="Markdown", reply_markup=kb)
 
 
