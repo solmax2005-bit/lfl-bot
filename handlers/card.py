@@ -29,7 +29,7 @@ async def _download_avatar(bot, file_id: str) -> bytes | None:
 
 DB_PATH = os.getenv("DB_PATH", "lfl_bot.db")
 
-WEBAPP_URL = os.getenv("WEBAPP_URL", "https://lflagent.ru/")
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://lflagent.ru/?v=3")
 
 # Reply-keyboard web_app buttons DON'T pass initData on Telegram Desktop, so the
 # keyboard "Открыть" is a plain button that replies with an INLINE web_app button
@@ -58,9 +58,8 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     name = user.first_name or "игрок"
     await update.message.reply_text(
         f"Привет, {name}!\n\nЯ ЛФЛ Агент — твой помощник в лиге.\n\n"
-        "📲 *Как открыть приложение:* нажми кнопку *Меню* (☰ слева от поля ввода) "
+        "📲 Как открыть приложение: нажми кнопку Меню (☰ слева от поля ввода) "
         "или кнопку ниже 👇\n\nВнутри — карточка игрока, поиск агентов, команды и избранное.",
-        parse_mode="Markdown",
         reply_markup=MAIN_KEYBOARD,
     )
     await update.message.reply_text("👇 Открыть приложение:", reply_markup=_OPEN_APP_KB)

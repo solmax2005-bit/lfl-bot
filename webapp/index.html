@@ -174,7 +174,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
 .seg button{flex:1;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--muted);font-weight:700;font-size:13.5px;cursor:pointer;font-family:'Inter';}
 .seg button.on{background:var(--blue);border-color:var(--blue);color:#fff;}
 .av{width:44px;height:44px;border-radius:13px;flex:none;background:linear-gradient(145deg,#dce9ff,#bcd6ff);display:flex;align-items:center;justify-content:center;font-family:'Archivo';font-weight:700;color:var(--blue-d);font-size:15px;}
-.heart{flex:none;background:none;border:none;font-size:20px;cursor:pointer;padding:4px;line-height:1;-webkit-tap-highlight-color:transparent;}
+.heart{flex:none;background:none;border:none;font-size:24px;cursor:pointer;padding:4px 6px;line-height:1;color:#ef5b6b;-webkit-tap-highlight-color:transparent;}
 .heart:active{transform:scale(.85);}
 </style>
 </head>
@@ -520,6 +520,7 @@ function renderCard(d, el) {
 
 let currentPos = '';
 let favSet = new Set();
+let _agentsList = [];
 
 async function loadAgents(pos) {
   currentPos = pos;
@@ -532,15 +533,17 @@ async function loadAgents(pos) {
     const favs = await api('/api/favorites?tg_id=' + userId);
     favSet = new Set(favs.map(f => f.tg_id));
     if (pos === '__fav__') {
+      _agentsList = favs;
       count.textContent = favs.length + ' в избранном';
       list.innerHTML = favs.length
         ? favs.map(renderAgentCard).join('')
-        : '<div class="empty-card"><div class="ico">⭐</div><h2>Избранное пусто</h2><p>Добавляй агентов кнопкой 🤍 в поиске</p></div>';
+        : '<div class="empty-card"><div class="ico">⭐</div><h2>Избранное пусто</h2><p>Добавляй агентов сердечком ♡ в поиске</p></div>';
       return;
     }
   }
 
   const agents = await api('/api/agents?position=' + encodeURIComponent(pos === '__fav__' ? '' : pos));
+  _agentsList = agents;
   count.textContent = agents.length + ' игрок' + plural(agents.length, '', 'а', 'ов') + ' ищут команду';
   if (agents.length === 0) {
     list.innerHTML = '<div class="empty-card"><div class="ico">🔍</div><h2>Никого нет</h2><p>Агентов по этой позиции пока нет</p></div>';
@@ -556,24 +559,48 @@ function renderAgentCard(a) {
   const mine = a.tg_id === userId;
   const isFav = favSet.has(a.tg_id);
   return `
-    <div class="agent">
+    <div class="agent" style="cursor:pointer" onclick="showAgentDetail(${a.tg_id})">
       <div class="av">${ini}</div>
       <div class="info">
         <div class="nm">${esc(a.name)} <span class="free"></span></div>
         <div class="meta">${esc(a.position)}${a.age ? ' · ' + a.age + ' лет' : ''}${gm ? ' · ' + gm : ''}</div>
       </div>
-      ${mine ? '' : `<button class="heart" onclick="toggleFav(${a.tg_id}, this)">${isFav ? '❤️' : '🤍'}</button>`}
-      ${link ? `<a class="write" href="${link}" target="_blank">Написать</a>` : ''}
+      ${mine ? '' : `<button class="heart" onclick="event.stopPropagation();toggleFav(${a.tg_id}, this)">${isFav ? '♥' : '♡'}</button>`}
+      ${link ? `<a class="write" href="${link}" target="_blank" onclick="event.stopPropagation()">Написать</a>` : ''}
     </div>`;
+}
+
+function showAgentDetail(tgId) {
+  const a = _agentsList.find(x => x.tg_id === tgId);
+  if (!a) return;
+  const list = document.getElementById('agents-list');
+  list.innerHTML = `<button class="btn ghost sm" style="width:auto;margin-bottom:8px" onclick="loadAgents(currentPos)">← Назад к списку</button><div id="agent-detail"></div>`;
+  renderCard(a, document.getElementById('agent-detail'));
+  const link = contactLink(a.contact, a.name);
+  const isFav = favSet.has(a.tg_id);
+  const mine = a.tg_id === userId;
+  const actions = `<div class="card-actions">
+    ${link ? `<a class="btn primary sm" href="${link}" target="_blank">💬 Написать</a>` : ''}
+    ${mine ? '' : `<button class="btn ghost sm" style="margin-top:8px" onclick="toggleFavDetail(${a.tg_id}, this)">${isFav ? '❤️ В избранном' : '🤍 В избранное'}</button>`}
+  </div>`;
+  document.getElementById('agent-detail').insertAdjacentHTML('beforeend', actions);
+}
+
+async function toggleFavDetail(tgId, btn) {
+  const res = await apiPost('/api/fav/toggle', {target_tg_id: tgId});
+  if (!res.ok) return;
+  tg.HapticFeedback?.impactOccurred?.('light');
+  if (res.fav) favSet.add(tgId); else favSet.delete(tgId);
+  btn.textContent = res.fav ? '❤️ В избранном' : '🤍 В избранное';
 }
 
 async function toggleFav(tgId, btn) {
   const res = await apiPost('/api/fav/toggle', {target_tg_id: tgId});
   if (!res.ok) return;
   tg.HapticFeedback?.impactOccurred?.('light');
-  if (res.fav) { favSet.add(tgId); btn.textContent = '❤️'; }
+  if (res.fav) { favSet.add(tgId); btn.textContent = '♥'; }
   else {
-    favSet.delete(tgId); btn.textContent = '🤍';
+    favSet.delete(tgId); btn.textContent = '♡';
     if (currentPos === '__fav__') loadAgents('__fav__');  // drop from the favorites view
   }
 }
