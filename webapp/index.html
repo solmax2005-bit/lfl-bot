@@ -419,7 +419,7 @@ async function loadProfile() {
       <div class="ic"><svg viewBox="0 0 24 24" fill="none"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h5" stroke-linecap="round"/></svg></div>
       Моя карточка игрока<span class="ar">›</span>
     </div>
-    <div class="menu-item">
+    <div class="menu-item" id="matches-btn">
       <div class="ic"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2" stroke-linecap="round"/></svg></div>
       История матчей<span class="ar" style="color:#c2ccdb">›</span>
     </div>`;
@@ -437,6 +437,10 @@ async function loadProfile() {
 
   document.getElementById('go-card-btn').addEventListener('click', () => {
     switchScreen('s-card');
+  });
+
+  document.getElementById('matches-btn').addEventListener('click', () => {
+    tg.showAlert('История матчей появится в следующем обновлении');
   });
 }
 
