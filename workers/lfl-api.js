@@ -1,4 +1,4 @@
-const BACKEND = "https://towards-denied-ordered-viewpicture.trycloudflare.com";
+const BACKEND = "http://37.220.85.92:8000";
 
 export default {
   async fetch(request) {
