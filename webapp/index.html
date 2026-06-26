@@ -125,7 +125,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
   position:fixed;left:0;right:0;bottom:0;
   background:rgba(255,255,255,.95);backdrop-filter:blur(14px);
   border-top:1px solid var(--line);
-  display:grid;grid-template-columns:repeat(3,1fr);
+  display:grid;grid-template-columns:repeat(4,1fr);
   padding:10px 8px calc(10px + env(safe-area-inset-bottom));
   z-index:100;
 }
@@ -173,6 +173,7 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
 .seg{display:flex;gap:8px;margin-bottom:10px;}
 .seg button{flex:1;padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--muted);font-weight:700;font-size:13.5px;cursor:pointer;font-family:'Inter';}
 .seg button.on{background:var(--blue);border-color:var(--blue);color:#fff;}
+.av{width:44px;height:44px;border-radius:13px;flex:none;background:linear-gradient(145deg,#dce9ff,#bcd6ff);display:flex;align-items:center;justify-content:center;font-family:'Archivo';font-weight:700;color:var(--blue-d);font-size:15px;}
 </style>
 </head>
 <body>
@@ -207,6 +208,11 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
   </div>
 </div>
 
+<!-- SCREEN 4: Команды -->
+<div class="screen" id="s-teams">
+  <div id="teams-content"></div>
+</div>
+
 <!-- BOTTOM NAV -->
 <div class="nav">
   <button class="on" data-t="s-card">
@@ -214,6 +220,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
   </button>
   <button data-t="s-search">
     <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="6"/><path d="M20 20l-4-4" stroke-linecap="round"/></svg>Поиск
+  </button>
+  <button data-t="s-teams">
+    <svg viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4-3 7-7 9-4-2-7-5-7-9V6l7-3z" stroke-linejoin="round"/></svg>Команды
   </button>
   <button data-t="s-profile">
     <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M5 20c1.5-4 12.5-4 14 0" stroke-linecap="round"/></svg>Профиль
@@ -617,6 +626,161 @@ async function loadProfile() {
   });
 }
 
+// ─── Teams screen ───────────────────────────────────────────────────────────
+
+const TEAM_DISTRICTS = ['ЮГ', 'Юго-восток', 'Запад', 'Северо-запад', 'Север', 'Северо-Восток', 'Восток'];
+const TEAM_DIVISIONS = ['Высший', 'Первый', 'Второй', 'Третий'];
+let currentTeamPos = '';
+let _team = null;
+
+function teamContact(c) {
+  c = c || '';
+  if (c.startsWith('@')) return 'https://t.me/' + c.slice(1);
+  if (c.startsWith('http')) return c;
+  return null;
+}
+
+async function loadTeams(pos) {
+  currentTeamPos = pos || '';
+  const el = document.getElementById('teams-content');
+  el.innerHTML = `
+    <div class="pad2">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px">
+        <div><div class="h-big">Команды</div><div class="h-sub" id="teams-count">Ищут игроков</div></div>
+        <button class="btn ghost sm" style="width:auto;white-space:nowrap" onclick="showMyTeam()">👥 Моя команда</button>
+      </div>
+      <div class="filters" id="team-filters">
+        ${['', 'Нападающий', 'Полузащитник', 'Защитник', 'Вратарь'].map(p =>
+          `<div class="fchip${currentTeamPos === p ? ' on' : ''}" data-pos="${p}">${p || 'Все'}</div>`).join('')}
+      </div>
+      <div id="teams-list"><div class="loader"></div></div>
+    </div>`;
+  document.getElementById('team-filters').addEventListener('click', e => {
+    const chip = e.target.closest('.fchip');
+    if (chip) loadTeams(chip.dataset.pos || '');
+  });
+  const teams = await api('/api/teams?position=' + encodeURIComponent(currentTeamPos));
+  const list = document.getElementById('teams-list');
+  document.getElementById('teams-count').textContent = teams.length + ' команд' + plural(teams.length, 'а', 'ы', '');
+  if (!teams.length) {
+    list.innerHTML = '<div class="empty-card"><div class="ico">🏟</div><h2>Команд нет</h2><p>По этому фильтру команды не найдены</p></div>';
+    return;
+  }
+  list.innerHTML = teams.map(renderTeamCard).join('');
+}
+
+function renderTeamCard(t) {
+  const meta = [t.league, (t.districts || []).join(', '), t.division].filter(Boolean).join(' · ');
+  const link = teamContact(t.contact);
+  const mine = t.tg_id === userId;
+  return `
+    <div class="card-block" style="margin-top:10px;padding:14px 16px">
+      <div style="display:flex;align-items:center;gap:12px">
+        <div class="av">${initials(t.name)}</div>
+        <div style="flex:1;min-width:0">
+          <div class="nm" style="font-weight:700">${esc(t.name)}</div>
+          <div class="meta" style="font-size:12px;color:var(--muted)">${esc(meta)}</div>
+        </div>
+      </div>
+      ${(t.positions && t.positions.length) ? `<div class="meta" style="margin-top:8px;font-size:13px"><b>Ищут:</b> ${esc(t.positions.join(', '))}</div>` : ''}
+      ${t.comment ? `<div class="meta" style="margin-top:4px;font-size:13px;color:var(--muted)">${esc(t.comment)}</div>` : ''}
+      <div class="btn-row" style="margin-top:10px">
+        ${link ? `<a class="btn ghost sm" href="${link}" target="_blank">💬 Написать</a>` : ''}
+        ${mine ? '<span class="btn ghost sm" style="opacity:.5">Твоя команда</span>'
+               : `<button class="btn primary sm" onclick="applyTeam(${t.tg_id})">📩 Подать заявку</button>`}
+      </div>
+    </div>`;
+}
+
+async function applyTeam(teamTgId) {
+  const res = await apiPost('/api/team/apply', {team_tg_id: teamTgId});
+  if (res.ok) { tg.HapticFeedback?.notificationOccurred?.('success'); tg.showAlert('✅ Заявка отправлена капитану!'); }
+}
+
+async function showMyTeam() {
+  const el = document.getElementById('teams-content');
+  el.innerHTML = '<div class="loader"></div>';
+  const t = userId ? await api('/api/team/me?tg_id=' + userId) : {found: false};
+  _team = t.found ? t : null;
+  if (!t.found) { showTeamForm(); return; }
+  const meta = [t.league, (t.districts || []).join(', '), t.division].filter(Boolean).join(' · ');
+  el.innerHTML = `
+    <div class="pad2">
+      <button class="btn ghost sm" style="width:auto" onclick="loadTeams(currentTeamPos)">← К списку команд</button>
+      <div class="card-block" style="margin-top:12px;padding:16px">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div class="av">${initials(t.name)}</div>
+          <div style="flex:1;min-width:0"><div class="nm" style="font-weight:700">${esc(t.name)}</div><div class="meta" style="font-size:12px;color:var(--muted)">${esc(meta)}</div></div>
+        </div>
+        ${(t.positions && t.positions.length) ? `<div class="meta" style="margin-top:8px;font-size:13px"><b>Ищут:</b> ${esc(t.positions.join(', '))}</div>` : ''}
+        ${t.comment ? `<div class="meta" style="margin-top:4px;font-size:13px;color:var(--muted)">${esc(t.comment)}</div>` : ''}
+        <div class="meta" style="margin-top:4px;font-size:13px;color:var(--muted)">Контакт: ${esc(t.contact || '—')}</div>
+      </div>
+      <div class="btn-row">
+        <button class="btn ghost sm" onclick="showTeamForm()">✏️ Редактировать</button>
+        <button class="btn danger sm" onclick="deleteTeam()">🗑 Удалить</button>
+      </div>
+    </div>`;
+}
+
+function showTeamForm() {
+  const el = document.getElementById('teams-content');
+  const t = _team || {};
+  const editing = !!_team;
+  const selPos = new Set(t.positions || []);
+  const selDist = new Set(t.districts || []);
+  el.innerHTML = `
+    <div class="form">
+      <h2>${editing ? 'Редактировать команду' : 'Регистрация команды'}</h2>
+      <div class="field"><label>Название</label>
+        <input id="t-name" value="${esc(t.name || '')}" placeholder="ФК Спартак"></div>
+      <div class="field"><label>Лига</label>
+        <input id="t-league" list="t-leagues-dl" value="${esc(t.league || '')}" placeholder="ЛФЛ">
+        <datalist id="t-leagues-dl">${LEAGUES.map(l => `<option value="${l}">`).join('')}</datalist></div>
+      <div class="field"><label>Округа (для ЛФЛ, необязательно)</label>
+        <div class="pos-grid" id="t-dist">
+          ${TEAM_DISTRICTS.map(d => `<div class="pos-opt${selDist.has(d) ? ' on' : ''}" data-v="${d}" onclick="this.classList.toggle('on')">${d}</div>`).join('')}
+        </div></div>
+      <div class="field"><label>Дивизион (необязательно)</label>
+        <select id="t-div"><option value="">—</option>${TEAM_DIVISIONS.map(d => `<option value="${d}"${t.division === d ? ' selected' : ''}>${d}</option>`).join('')}</select></div>
+      <div class="field"><label>Нужные позиции</label>
+        <div class="pos-grid" id="t-pos">
+          ${POSITIONS.map(p => `<div class="pos-opt${selPos.has(p) ? ' on' : ''}" data-v="${p}" onclick="this.classList.toggle('on')">${p}</div>`).join('')}
+        </div></div>
+      <div class="field"><label>Контакт</label>
+        <input id="t-contact" value="${esc(t.contact || '')}" placeholder="@username (по умолчанию твой)"></div>
+      <div class="field"><label>Комментарий</label>
+        <textarea id="t-comment" placeholder="Условия, тренировки и т.д.">${esc(t.comment || '')}</textarea></div>
+      <button class="btn primary" onclick="submitTeam()">💾 Сохранить</button>
+      <div style="height:10px"></div>
+      <button class="btn ghost" onclick="${editing ? 'showMyTeam()' : 'loadTeams(currentTeamPos)'}">Отмена</button>
+    </div>`;
+}
+
+async function submitTeam() {
+  const name = document.getElementById('t-name').value.trim();
+  const league = document.getElementById('t-league').value.trim();
+  const districts = [...document.querySelectorAll('#t-dist .pos-opt.on')].map(e => e.dataset.v);
+  const division = document.getElementById('t-div').value;
+  const positions = [...document.querySelectorAll('#t-pos .pos-opt.on')].map(e => e.dataset.v);
+  const contact = document.getElementById('t-contact').value.trim();
+  const comment = document.getElementById('t-comment').value.trim();
+  if (!name) return tg.showAlert('Укажи название');
+  if (!league) return tg.showAlert('Укажи лигу');
+  if (!positions.length) return tg.showAlert('Выбери нужные позиции');
+  const res = await apiPost('/api/team/save', {name, league, districts, division, positions, contact, comment});
+  if (res.ok) { tg.HapticFeedback?.notificationOccurred?.('success'); _team = res.team; showMyTeam(); }
+  else if (res.error) tg.showAlert(res.error);
+}
+
+function deleteTeam() {
+  tg.showConfirm('Удалить команду?', async (ok) => {
+    if (!ok) return;
+    const res = await apiPost('/api/team/delete', {});
+    if (res.ok) { _team = null; loadTeams(currentTeamPos); }
+  });
+}
+
 // ─── Navigation ───────────────────────────────────────────────────────────────
 
 function switchScreen(id) {
@@ -631,6 +795,9 @@ function switchScreen(id) {
   }
   if (id === 's-profile') {
     loadProfile();
+  }
+  if (id === 's-teams') {
+    loadTeams(currentTeamPos);
   }
 }
 
