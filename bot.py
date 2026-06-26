@@ -145,7 +145,16 @@ def main() -> None:
     # Lower connect_timeout so a stalled handshake fails fast and RetryRequest
     # can retry, instead of blocking the whole 30s on one dead connection.
     request = RetryRequest(connect_timeout=15.0, read_timeout=35.0, write_timeout=20.0, pool_timeout=5.0)
-    app = Application.builder().token(token).request(request).post_init(post_init).build()
+    # concurrent_updates: process different users' updates in parallel (so a long
+    # broadcast doesn't block replies to everyone else).
+    app = (
+        Application.builder()
+        .token(token)
+        .request(request)
+        .concurrent_updates(True)
+        .post_init(post_init)
+        .build()
+    )
 
     # Rate limit (group=-2 stops all further processing if triggered)
     app.add_handler(MessageHandler(filters.ALL, _rate_limit), group=-2)
