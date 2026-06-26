@@ -23,11 +23,44 @@ def _httpx_no_proxy_init(self, *args, **kwargs):
     _orig_httpx_init(self, *args, **kwargs)
 httpx.AsyncClient.__init__ = _httpx_no_proxy_init
 
+import asyncio
 from telegram.ext import (
     Application, CommandHandler, MessageHandler,
     CallbackQueryHandler, filters, ApplicationHandlerStop,
 )
 from telegram.request import HTTPXRequest
+
+# Outbound calls to api.telegram.org from the RU server intermittently fail to
+# establish a connection (DPI throttling of new TLS handshakes). getUpdates
+# survives because the Updater retries it; send_message/answer_callback_query
+# have no retry, so a single ConnectTimeout makes buttons look "dead".
+# Retry ONLY connection-establishment errors (request never reached Telegram),
+# so we never risk sending a message twice.
+_RETRYABLE_CAUSES = (
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.PoolTimeout,
+    httpx.WriteTimeout,
+    httpx.WriteError,
+)
+
+
+class RetryRequest(HTTPXRequest):
+    async def do_request(self, *args, **kwargs):
+        last_exc = None
+        for attempt in range(5):
+            try:
+                return await super().do_request(*args, **kwargs)
+            except Exception as exc:
+                if not isinstance(exc.__cause__, _RETRYABLE_CAUSES):
+                    raise
+                last_exc = exc
+                logging.warning(
+                    "Telegram connect failed (attempt %d/5): %s — retrying",
+                    attempt + 1, exc.__cause__.__class__.__name__,
+                )
+                await asyncio.sleep(min(0.5 * 2 ** attempt, 4.0))
+        raise last_exc
 from handlers.card import (
     start_handler, help_handler, help_button_handler, help_contact_callback,
     mycard_handler,
@@ -109,7 +142,9 @@ async def post_init(app):
 
 def main() -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
-    request = HTTPXRequest(connect_timeout=30.0, read_timeout=35.0, write_timeout=30.0)
+    # Lower connect_timeout so a stalled handshake fails fast and RetryRequest
+    # can retry, instead of blocking the whole 30s on one dead connection.
+    request = RetryRequest(connect_timeout=15.0, read_timeout=35.0, write_timeout=20.0, pool_timeout=5.0)
     app = Application.builder().token(token).request(request).post_init(post_init).build()
 
     # Rate limit (group=-2 stops all further processing if triggered)
