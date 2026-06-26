@@ -136,7 +136,8 @@ async def _card_response(tg_id: int) -> dict:
 
 @app.get("/")
 async def root():
-    return FileResponse("webapp/index.html")
+    # no-store so Telegram clients always fetch the latest Mini App (avoid stale cache)
+    return FileResponse("webapp/index.html", headers={"Cache-Control": "no-store, must-revalidate"})
 
 
 @app.get("/api/me")

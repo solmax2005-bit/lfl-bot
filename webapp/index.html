@@ -237,7 +237,15 @@ const tg = window.Telegram.WebApp;
 tg.ready();
 tg.expand();
 
-const tgUser = tg.initDataUnsafe?.user;
+let tgUser = tg.initDataUnsafe?.user;
+// Fallback: some clients (Telegram Desktop/Web) leave initDataUnsafe.user empty
+// but still provide the signed initData string — parse the user out of it.
+if (!tgUser && tg.initData) {
+  try {
+    const u = new URLSearchParams(tg.initData).get('user');
+    if (u) tgUser = JSON.parse(u);
+  } catch (e) {}
+}
 const userId = tgUser?.id;
 const API = '';  // same-origin: фронт и API отдаёт один сервер (Caddy → FastAPI)
 
