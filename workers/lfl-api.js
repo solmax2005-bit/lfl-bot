@@ -1,4 +1,4 @@
-const BACKEND = "https://buf-indiana-manuals-matter.trycloudflare.com";
+const BACKEND = "https://hitachi-install-listprice-tags.trycloudflare.com";
 
 export default {
   async fetch(request) {
