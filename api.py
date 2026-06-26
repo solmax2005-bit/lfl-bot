@@ -13,11 +13,13 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import aiosqlite
+import httpx
 
 from scraper.parsers.registry import detect_and_parse
 from database.queries import (
     upsert_agent, get_agent_by_tg_id, deactivate_agent, activate_agent,
     update_looking, delete_agent_permanently,
+    upsert_team, get_teams, get_team_by_tg_id, deactivate_team,
 )
 
 DB_PATH = os.getenv("DB_PATH", "lfl_bot.db")
@@ -62,7 +64,12 @@ def verify_init_data(raw: str, max_age: int = 86400) -> dict:
     tg_id = user.get("id")
     if not tg_id:
         raise HTTPException(status_code=403, detail="no user")
-    return {"tg_id": int(tg_id), "username": user.get("username") or ""}
+    return {
+        "tg_id": int(tg_id),
+        "username": user.get("username") or "",
+        "first_name": user.get("first_name") or "",
+        "last_name": user.get("last_name") or "",
+    }
 
 
 def _contact_for(user: dict) -> str:
@@ -257,6 +264,113 @@ async def card_status(req: StatusReq):
 async def card_delete(req: InitReq):
     user = verify_init_data(req.init_data)
     await delete_agent_permanently(DB_PATH, user["tg_id"])
+    return {"ok": True}
+
+
+# ── Teams (Phase 2) ──────────────────────────────────────────────────────────
+
+def _team_public(t: dict) -> dict:
+    return {
+        "tg_id": t.get("tg_id"),
+        "name": t.get("name", ""),
+        "league": t.get("league", ""),
+        "districts": t.get("districts", []),
+        "division": t.get("division", ""),
+        "positions": t.get("positions", []),
+        "contact": t.get("contact", ""),
+        "comment": t.get("comment", ""),
+        "active": t.get("active", 0),
+    }
+
+
+async def _send_telegram(chat_id: int, text: str) -> None:
+    if not BOT_TOKEN:
+        return
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as c:
+            await c.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                json={"chat_id": chat_id, "text": text},
+            )
+    except Exception:
+        pass
+
+
+class TeamSaveReq(BaseModel):
+    init_data: str
+    name: str
+    league: str
+    districts: list[str] = []
+    division: str = ""
+    positions: list[str] = []
+    contact: str = ""
+    comment: str = ""
+
+
+class ApplyReq(BaseModel):
+    init_data: str
+    team_tg_id: int
+
+
+@app.get("/api/teams")
+async def api_teams(
+    league: str = Query(default=""),
+    district: str = Query(default=""),
+    position: str = Query(default=""),
+):
+    districts = [district] if district else []
+    positions = [position] if position else []
+    teams = await get_teams(DB_PATH, league=league or None, districts=districts, positions=positions)
+    return [_team_public(t) for t in teams]
+
+
+@app.get("/api/team/me")
+async def api_team_me(tg_id: int = Query(...)):
+    t = await get_team_by_tg_id(DB_PATH, tg_id)
+    if not t or not t.get("active"):
+        return {"found": False}
+    return {"found": True, **_team_public(t)}
+
+
+@app.post("/api/team/save")
+async def team_save(req: TeamSaveReq):
+    user = verify_init_data(req.init_data)
+    tg_id = user["tg_id"]
+    if not req.name.strip():
+        return {"ok": False, "error": "Укажи название команды"}
+    if not req.league.strip():
+        return {"ok": False, "error": "Укажи лигу"}
+    positions = [p for p in req.positions if p in POSITIONS]
+    if not positions:
+        return {"ok": False, "error": "Выбери хотя бы одну нужную позицию"}
+    contact = req.contact.strip() or (f"@{user['username']}" if user.get("username") else str(tg_id))
+    await upsert_team(
+        DB_PATH, tg_id,
+        name=req.name.strip(), league=req.league.strip(),
+        districts=req.districts, division=req.division,
+        positions=positions, contact=contact, comment=req.comment.strip(),
+    )
+    t = await get_team_by_tg_id(DB_PATH, tg_id)
+    return {"ok": True, "team": _team_public(t)}
+
+
+@app.post("/api/team/delete")
+async def team_delete(req: InitReq):
+    user = verify_init_data(req.init_data)
+    await deactivate_team(DB_PATH, user["tg_id"])
+    return {"ok": True}
+
+
+@app.post("/api/team/apply")
+async def team_apply(req: ApplyReq):
+    user = verify_init_data(req.init_data)
+    name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or "Игрок"
+    uname = f"@{user['username']}" if user.get("username") else f"tg_id: {user['tg_id']}"
+    await _send_telegram(
+        req.team_tg_id,
+        f"⚽ Новая заявка на вступление!\n\n👤 {name}\n📱 {uname}\n\n"
+        f"Напиши игроку напрямую чтобы договориться.",
+    )
     return {"ok": True}
 
 

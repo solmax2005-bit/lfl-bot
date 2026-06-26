@@ -162,3 +162,75 @@ def test_import_unrecognized_url(monkeypatch):
     raw = make_init_data({"id": 12})
     r = client.post("/api/card/import", json={"init_data": raw, "url": "https://example.com"})
     assert r.json()["ok"] is False
+
+
+# ── Teams (Phase 2) ───────────────────────────────────────────────────────────
+
+def _save_team(uid, name, positions, league="ЛФЛ", districts=None):
+    raw = make_init_data({"id": uid, "username": f"u{uid}"})
+    return client.post("/api/team/save", json={
+        "init_data": raw, "name": name, "league": league,
+        "districts": districts or [], "division": "Первый",
+        "positions": positions, "contact": "@cap", "comment": "ищем игроков",
+    })
+
+
+def test_team_save_and_list():
+    r = _save_team(100, "Спартак-Юг", ["Нападающий", "Защитник"])
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["team"]["name"] == "Спартак-Юг"
+    assert "Нападающий" in body["team"]["positions"]
+
+    teams = client.get("/api/teams").json()
+    assert any(t["name"] == "Спартак-Юг" for t in teams)
+
+
+def test_team_save_requires_position():
+    raw = make_init_data({"id": 101})
+    r = client.post("/api/team/save", json={
+        "init_data": raw, "name": "X", "league": "ЛФЛ", "positions": [],
+    })
+    assert r.json()["ok"] is False
+
+
+def test_team_save_rejects_forged():
+    r = client.post("/api/team/save", json={
+        "init_data": "bad", "name": "X", "league": "ЛФЛ", "positions": ["Вратарь"],
+    })
+    assert r.status_code == 403
+
+
+def test_teams_filter_by_position():
+    _save_team(102, "Только нападающие", ["Нападающий"])
+    _save_team(103, "Только вратари", ["Вратарь"])
+    fwd = client.get("/api/teams", params={"position": "Нападающий"}).json()
+    names = [t["name"] for t in fwd]
+    assert "Только нападающие" in names
+    assert "Только вратари" not in names
+
+
+def test_team_me_and_delete():
+    _save_team(104, "Моя Команда", ["Полузащитник"])
+    me = client.get("/api/team/me", params={"tg_id": 104}).json()
+    assert me["found"] is True
+    assert me["name"] == "Моя Команда"
+    raw = make_init_data({"id": 104})
+    assert client.post("/api/team/delete", json={"init_data": raw}).json()["ok"] is True
+    assert client.get("/api/team/me", params={"tg_id": 104}).json()["found"] is False
+
+
+def test_team_apply_notifies_captain(monkeypatch):
+    sent = {}
+
+    async def fake_send(chat_id, text):
+        sent["chat_id"] = chat_id
+        sent["text"] = text
+
+    monkeypatch.setattr(api, "_send_telegram", fake_send)
+    raw = make_init_data({"id": 200, "username": "applicant", "first_name": "Игорь"})
+    r = client.post("/api/team/apply", json={"init_data": raw, "team_tg_id": 999})
+    assert r.json()["ok"] is True
+    assert sent["chat_id"] == 999
+    assert "Игорь" in sent["text"]
