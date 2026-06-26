@@ -1,4 +1,4 @@
-const BACKEND = "https://hitachi-install-listprice-tags.trycloudflare.com";
+const BACKEND = "https://towards-denied-ordered-viewpicture.trycloudflare.com";
 
 export default {
   async fetch(request) {
