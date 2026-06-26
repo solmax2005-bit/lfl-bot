@@ -199,7 +199,6 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
       <div class="fchip" data-pos="Полузащитник">Полузащитник</div>
       <div class="fchip" data-pos="Защитник">Защитник</div>
       <div class="fchip" data-pos="Вратарь">Вратарь</div>
-      <div class="fchip" data-pos="__fav__">⭐ Избранное</div>
     </div>
     <div class="agents-list" id="agents-list"><div class="loader"></div></div>
   </div>
@@ -522,7 +521,6 @@ function renderCard(d, el) {
 // ─── Search screen ────────────────────────────────────────────────────────────
 
 let currentPos = '';
-let favSet = new Set();
 let _agentsList = [];
 
 async function loadAgents(pos) {
@@ -530,22 +528,7 @@ async function loadAgents(pos) {
   const list = document.getElementById('agents-list');
   const count = document.getElementById('agents-count');
   list.innerHTML = '<div class="loader"></div>';
-
-  // Refresh favorites set so hearts render correctly.
-  if (userId) {
-    const favs = await api('/api/favorites?tg_id=' + userId);
-    favSet = new Set(favs.map(f => f.tg_id));
-    if (pos === '__fav__') {
-      _agentsList = favs;
-      count.textContent = favs.length + ' в избранном';
-      list.innerHTML = favs.length
-        ? favs.map(renderAgentCard).join('')
-        : '<div class="empty-card"><div class="ico">⭐</div><h2>Избранное пусто</h2><p>Добавляй агентов сердечком ♡ в поиске</p></div>';
-      return;
-    }
-  }
-
-  const agents = await api('/api/agents?position=' + encodeURIComponent(pos === '__fav__' ? '' : pos));
+  const agents = await api('/api/agents?position=' + encodeURIComponent(pos));
   _agentsList = agents;
   count.textContent = agents.length + ' игрок' + plural(agents.length, '', 'а', 'ов') + ' ищут команду';
   if (agents.length === 0) {
@@ -559,8 +542,6 @@ function renderAgentCard(a) {
   const ini = initials(a.name);
   const link = contactLink(a.contact, a.name);
   const gm = a.matches > 0 ? `${a.goals} гол · ${a.matches} игр` : '';
-  const mine = a.tg_id === userId;
-  const isFav = favSet.has(a.tg_id);
   return `
     <div class="agent" style="cursor:pointer" onclick="showAgentDetail(${a.tg_id})">
       <div class="av">${ini}</div>
@@ -568,7 +549,6 @@ function renderAgentCard(a) {
         <div class="nm">${esc(a.name)} <span class="free"></span></div>
         <div class="meta">${esc(a.position)}${a.age ? ' · ' + a.age + ' лет' : ''}${gm ? ' · ' + gm : ''}</div>
       </div>
-      ${mine ? '' : `<button class="heart" onclick="event.stopPropagation();toggleFav(${a.tg_id}, this)">${isFav ? '♥' : '♡'}</button>`}
       ${link ? `<a class="write" href="${link}" target="_blank" onclick="event.stopPropagation()">Написать</a>` : ''}
     </div>`;
 }
@@ -580,31 +560,9 @@ function showAgentDetail(tgId) {
   list.innerHTML = `<button class="btn ghost sm" style="width:auto;margin-bottom:8px" onclick="loadAgents(currentPos)">← Назад к списку</button><div id="agent-detail"></div>`;
   renderCard(a, document.getElementById('agent-detail'));
   const link = contactLink(a.contact, a.name);
-  const isFav = favSet.has(a.tg_id);
-  const mine = a.tg_id === userId;
-  const actions = `<div class="card-actions">
-    ${link ? `<a class="btn primary sm" href="${link}" target="_blank">💬 Написать</a>` : ''}
-    ${mine ? '' : `<button class="btn ghost sm" style="margin-top:8px" onclick="toggleFavDetail(${a.tg_id}, this)">${isFav ? '❤️ В избранном' : '🤍 В избранное'}</button>`}
-  </div>`;
-  document.getElementById('agent-detail').insertAdjacentHTML('beforeend', actions);
-}
-
-async function toggleFavDetail(tgId, btn) {
-  const res = await apiPost('/api/fav/toggle', {target_tg_id: tgId});
-  if (!res.ok) return;
-  tg.HapticFeedback?.impactOccurred?.('light');
-  if (res.fav) favSet.add(tgId); else favSet.delete(tgId);
-  btn.textContent = res.fav ? '❤️ В избранном' : '🤍 В избранное';
-}
-
-async function toggleFav(tgId, btn) {
-  const res = await apiPost('/api/fav/toggle', {target_tg_id: tgId});
-  if (!res.ok) return;
-  tg.HapticFeedback?.impactOccurred?.('light');
-  if (res.fav) { favSet.add(tgId); btn.textContent = '♥'; }
-  else {
-    favSet.delete(tgId); btn.textContent = '♡';
-    if (currentPos === '__fav__') loadAgents('__fav__');  // drop from the favorites view
+  if (link) {
+    document.getElementById('agent-detail').insertAdjacentHTML('beforeend',
+      `<div class="card-actions"><a class="btn primary sm" href="${link}" target="_blank">💬 Написать</a></div>`);
   }
 }
 
