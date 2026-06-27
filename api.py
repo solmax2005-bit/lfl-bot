@@ -11,8 +11,11 @@ import time
 import asyncio
 from urllib.parse import parse_qsl
 
-from fastapi import FastAPI, Query, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse
+import logging
+from collections import defaultdict, deque
+
+from fastapi import FastAPI, Query, HTTPException, BackgroundTasks, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -37,7 +40,50 @@ POSITIONS = {"Нападающий", "Полузащитник", "Защитни
 LEAGUES = {"ЛФЛ", "AFL", "Pari Amateur", "F-лига", ""}
 
 app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+# CORS: the Mini App is served same-origin from lflagent.ru, so only that origin
+# (overridable via CORS_ORIGINS) needs cross-origin access — never "*".
+ALLOWED_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "https://lflagent.ru").split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],
+)
+
+# ── Request limits + security headers ─────────────────────────────────────────
+MAX_BODY_BYTES = 12 * 1024 * 1024          # reject oversized uploads early (DoS)
+RATE_LIMIT_ENABLED = True                  # toggled off in tests
+_RL_WINDOW = 60
+_RL_MAX = 120                              # POST requests / minute / IP (general)
+_RL_PHOTO_MAX = 10                         # photo uploads / minute / IP
+_rl_hits: dict[str, deque] = defaultdict(deque)
+
+
+@app.middleware("http")
+async def _guard(request: Request, call_next):
+    cl = request.headers.get("content-length")
+    if cl and cl.isdigit() and int(cl) > MAX_BODY_BYTES:
+        return JSONResponse({"ok": False, "error": "Запрос слишком большой"}, status_code=413)
+    if RATE_LIMIT_ENABLED and request.method == "POST":
+        ip = request.client.host if request.client else "?"
+        is_photo = request.url.path.endswith("/photo")
+        key = f"{ip}:{'photo' if is_photo else 'gen'}"
+        limit = _RL_PHOTO_MAX if is_photo else _RL_MAX
+        now = time.time()
+        dq = _rl_hits[key]
+        while dq and now - dq[0] > _RL_WINDOW:
+            dq.popleft()
+        if len(dq) >= limit:
+            return JSONResponse({"ok": False, "error": "Слишком много запросов, подожди минуту"}, status_code=429)
+        dq.append(now)
+    resp = await call_next(request)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    # Only Telegram clients may frame the Mini App (anti-clickjacking).
+    resp.headers["Content-Security-Policy"] = "frame-ancestors 'self' https://telegram.org https://*.telegram.org"
+    return resp
+
 
 PHOTOS_DIR = "photos"
 os.makedirs(PHOTOS_DIR, exist_ok=True)
@@ -67,8 +113,11 @@ def verify_init_data(raw: str, max_age: int = 86400) -> dict:
     if not hmac.compare_digest(calc_hash, received_hash):
         raise HTTPException(status_code=403, detail="bad signature")
     auth_date = int(pairs.get("auth_date") or 0)
-    if max_age and auth_date and (time.time() - auth_date) > max_age:
-        raise HTTPException(status_code=403, detail="expired")
+    if max_age:
+        if not auth_date:
+            raise HTTPException(status_code=403, detail="no auth_date")
+        if (time.time() - auth_date) > max_age:
+            raise HTTPException(status_code=403, detail="expired")
     try:
         user = json.loads(pairs.get("user") or "{}")
     except Exception:
@@ -86,6 +135,11 @@ def verify_init_data(raw: str, max_age: int = 86400) -> dict:
 
 def _contact_for(user: dict) -> str:
     return f"@{user['username']}" if user.get("username") else str(user["tg_id"])
+
+
+def _clean_contact(c: str) -> str:
+    # Strip characters that could break out of an HTML attribute on the client.
+    return "".join(ch for ch in (c or "").strip() if ch not in '"\'<>').strip()
 
 
 def _profile_to_json(p) -> str:
@@ -142,7 +196,14 @@ async def _card_response(tg_id: int) -> dict:
     return {"ok": True, "profile": _parse_profile(row)}
 
 
-# ── Read endpoints (unverified tg_id, read-only) ─────────────────────────────
+class InitReq(BaseModel):
+    init_data: str
+
+
+# ── Read endpoints ────────────────────────────────────────────────────────────
+# Public listings (active agents/teams) take no identity. Personal data
+# (/api/me, /api/team/me, /api/favorites) requires verified initData — never a
+# raw tg_id from the query string (that allowed enumerating anyone's contact).
 
 @app.get("/")
 async def root():
@@ -157,11 +218,12 @@ async def visit():
     return {"ok": True}
 
 
-@app.get("/api/me")
-async def get_me(tg_id: int = Query(...)):
+@app.post("/api/me")
+async def get_me(req: InitReq):
+    user = verify_init_data(req.init_data)
     async with aiosqlite.connect(DB_PATH) as conn:
         conn.row_factory = aiosqlite.Row
-        cur = await conn.execute("SELECT * FROM free_agents WHERE tg_id=?", (tg_id,))
+        cur = await conn.execute("SELECT * FROM free_agents WHERE tg_id=?", (user["tg_id"],))
         row = await cur.fetchone()
     if not row:
         return {"found": False}
@@ -203,10 +265,6 @@ class SaveReq(BaseModel):
     comment: str = ""
 
 
-class InitReq(BaseModel):
-    init_data: str
-
-
 class StatusReq(BaseModel):
     init_data: str
     active: int | None = None
@@ -220,7 +278,8 @@ async def card_import(req: ImportReq):
     try:
         profile = await detect_and_parse(req.url)
     except Exception as e:
-        return {"ok": False, "error": str(e) or "Не удалось загрузить профиль"}
+        logging.warning("card_import parse failed: %s", e)
+        return {"ok": False, "error": "Не удалось загрузить профиль"}
     if profile is None:
         return {"ok": False, "error": "Ссылка не распознана. Поддерживаются lfl.ru, afl.ru, f-league.ru"}
     await upsert_agent(
@@ -347,7 +406,8 @@ async def card_refresh(req: InitReq):
     try:
         fresh = await detect_and_parse(existing["lfl_url"])
     except Exception as e:
-        return {"ok": False, "error": str(e) or "Не удалось обновить"}
+        logging.warning("card_refresh parse failed: %s", e)
+        return {"ok": False, "error": "Не удалось обновить"}
     if not fresh:
         return {"ok": False, "error": "Не удалось загрузить данные с сайта"}
     # keep extra clubs the user added manually
@@ -411,8 +471,8 @@ async def _notify_teams_new_player(agent_tg_id: int, agent_name: str, position: 
         if team["tg_id"] == agent_tg_id:
             continue
         await _send_telegram(
-            team["tg_id"], f"🔍 Появился новый свободный агент!\n\n*{agent_name}* — {position}",
-            parse_mode="Markdown", reply_markup=kb,
+            team["tg_id"], f"🔍 Появился новый свободный агент!\n\n{agent_name} — {position}",
+            reply_markup=kb,
         )
         await asyncio.sleep(0.05)
 
@@ -425,8 +485,8 @@ async def _notify_players_new_team(team_tg_id: int, team_name: str, league: str,
         if agent["tg_id"] == team_tg_id:
             continue
         await _send_telegram(
-            agent["tg_id"], f"🏟 Появилась новая команда!\n\n*{team_name}* — {league}\nИщут: {pos_str}",
-            parse_mode="Markdown", reply_markup=kb,
+            agent["tg_id"], f"🏟 Появилась новая команда!\n\n{team_name} — {league}\nИщут: {pos_str}",
+            reply_markup=kb,
         )
         await asyncio.sleep(0.05)
 
@@ -459,9 +519,10 @@ async def api_teams(
     return [_team_public(t) for t in teams]
 
 
-@app.get("/api/team/me")
-async def api_team_me(tg_id: int = Query(...)):
-    t = await get_team_by_tg_id(DB_PATH, tg_id)
+@app.post("/api/team/me")
+async def api_team_me(req: InitReq):
+    user = verify_init_data(req.init_data)
+    t = await get_team_by_tg_id(DB_PATH, user["tg_id"])
     if not t or not t.get("active"):
         return {"found": False}
     return {"found": True, **_team_public(t)}
@@ -480,7 +541,7 @@ async def team_save(req: TeamSaveReq, background: BackgroundTasks):
         return {"ok": False, "error": "Выбери хотя бы одну нужную позицию"}
     existing = await get_team_by_tg_id(DB_PATH, tg_id)
     was_active = bool(existing and existing.get("active"))
-    contact = req.contact.strip() or (f"@{user['username']}" if user.get("username") else str(tg_id))
+    contact = _clean_contact(req.contact) or (f"@{user['username']}" if user.get("username") else str(tg_id))
     await upsert_team(
         DB_PATH, tg_id,
         name=req.name.strip(), league=req.league.strip(),
@@ -520,6 +581,9 @@ async def team_photo(req: PhotoReq):
 @app.post("/api/team/apply")
 async def team_apply(req: ApplyReq):
     user = verify_init_data(req.init_data)
+    team = await get_team_by_tg_id(DB_PATH, req.team_tg_id)
+    if not team or not team.get("active"):
+        return {"ok": False, "error": "Команда не найдена"}
     name = f"{user.get('first_name', '')} {user.get('last_name', '')}".strip() or "Игрок"
     uname = f"@{user['username']}" if user.get("username") else f"tg_id: {user['tg_id']}"
     await _send_telegram(
@@ -548,9 +612,10 @@ async def fav_toggle(req: FavReq):
     return {"ok": True, "fav": True}
 
 
-@app.get("/api/favorites")
-async def api_favorites(tg_id: int = Query(...)):
-    favs = await get_favorites(DB_PATH, tg_id, "agent")
+@app.post("/api/favorites")
+async def api_favorites(req: InitReq):
+    user = verify_init_data(req.init_data)
+    favs = await get_favorites(DB_PATH, user["tg_id"], "agent")
     out = []
     for f in favs:
         a = await get_agent_by_tg_id(DB_PATH, f["target_tg_id"])
@@ -559,10 +624,6 @@ async def api_favorites(tg_id: int = Query(...)):
     return out
 
 
-# Backward-compat alias for the old Mini App profile toggle.
-@app.post("/api/agent/toggle-free")
-async def toggle_free(tg_id: int = Query(...), active: int = Query(...)):
-    async with aiosqlite.connect(DB_PATH) as conn:
-        await conn.execute("UPDATE free_agents SET active=? WHERE tg_id=?", (active, tg_id))
-        await conn.commit()
-    return {"ok": True}
+# NOTE: the old `/api/agent/toggle-free` endpoint was removed — it accepted an
+# unauthenticated tg_id from the query string and let anyone toggle any card's
+# visibility (IDOR). Use the initData-verified `/api/card/status` instead.

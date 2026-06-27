@@ -24,9 +24,10 @@ async def fetch_html(url: str, timeout: float = 15.0, encoding: str | None = Non
     scraperapi_key = os.getenv("SCRAPERAPI_KEY", "")
     cf_worker = os.getenv("CF_WORKER_URL", "")
 
-    if cf_worker and "lfl.ru" in url:
+    cf_secret = os.getenv("CF_WORKER_SECRET", "")
+    if cf_worker and cf_secret and "lfl.ru" in url:
         from urllib.parse import quote
-        fetch_url = f"{cf_worker}?secret=lfl_proxy_2024&url={quote(url, safe='')}"
+        fetch_url = f"{cf_worker}?secret={cf_secret}&url={quote(url, safe='')}"
         headers = {}
         proxy = None
     elif proxy_url:

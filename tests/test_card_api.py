@@ -43,6 +43,7 @@ def _setup(tmp_path, monkeypatch):
     monkeypatch.setattr(api, "DB_PATH", db)
     monkeypatch.setattr(api, "BOT_TOKEN", TEST_TOKEN)
     monkeypatch.setattr(api, "PHOTOS_DIR", str(phdir))
+    monkeypatch.setattr(api, "RATE_LIMIT_ENABLED", False)
     yield
 
 
@@ -133,7 +134,7 @@ def test_delete_removes_card():
     })
     r = client.post("/api/card/delete", json={"init_data": raw})
     assert r.json()["ok"] is True
-    me = client.get("/api/me", params={"tg_id": 10}).json()
+    me = client.post("/api/me", json={"init_data": raw}).json()
     assert me["found"] is False
 
 
@@ -219,12 +220,12 @@ def test_teams_filter_by_position():
 
 def test_team_me_and_delete():
     _save_team(104, "Моя Команда", ["Полузащитник"])
-    me = client.get("/api/team/me", params={"tg_id": 104}).json()
+    raw = make_init_data({"id": 104})
+    me = client.post("/api/team/me", json={"init_data": raw}).json()
     assert me["found"] is True
     assert me["name"] == "Моя Команда"
-    raw = make_init_data({"id": 104})
     assert client.post("/api/team/delete", json={"init_data": raw}).json()["ok"] is True
-    assert client.get("/api/team/me", params={"tg_id": 104}).json()["found"] is False
+    assert client.post("/api/team/me", json={"init_data": raw}).json()["found"] is False
 
 
 def test_team_apply_notifies_captain(monkeypatch):
@@ -234,6 +235,7 @@ def test_team_apply_notifies_captain(monkeypatch):
         sent["chat_id"] = chat_id
         sent["text"] = text
 
+    _save_team(999, "Кэп FC", ["Нападающий"])   # captain's team must exist & be active
     monkeypatch.setattr(api, "_send_telegram", fake_send)
     raw = make_init_data({"id": 200, "username": "applicant", "first_name": "Игорь"})
     r = client.post("/api/team/apply", json={"init_data": raw, "team_tg_id": 999})
@@ -252,11 +254,11 @@ def test_fav_toggle_and_list():
     raw_viewer = make_init_data({"id": 301, "username": "viewer"})
     r = client.post("/api/fav/toggle", json={"init_data": raw_viewer, "target_tg_id": 300})
     assert r.json() == {"ok": True, "fav": True}
-    favs = client.get("/api/favorites", params={"tg_id": 301}).json()
+    favs = client.post("/api/favorites", json={"init_data": raw_viewer}).json()
     assert any(f["tg_id"] == 300 for f in favs)
     r2 = client.post("/api/fav/toggle", json={"init_data": raw_viewer, "target_tg_id": 300})
     assert r2.json()["fav"] is False
-    assert client.get("/api/favorites", params={"tg_id": 301}).json() == []
+    assert client.post("/api/favorites", json={"init_data": raw_viewer}).json() == []
 
 
 def test_fav_rejects_forged():
@@ -396,6 +398,43 @@ def test_visit_and_stats():
     s = asyncio.run(get_stats(api.DB_PATH))
     assert s["miniapp_opens"] >= 2
     assert s["cards"] >= 1
+
+
+# ── Security regressions ──────────────────────────────────────────────────────
+
+def test_toggle_free_endpoint_removed():
+    # The old unauthenticated IDOR endpoint must no longer exist.
+    r = client.post("/api/agent/toggle-free", params={"tg_id": 1, "active": 0})
+    assert r.status_code in (404, 405)
+
+
+def test_me_requires_init_data():
+    # GET with a raw tg_id is no longer allowed; POST needs valid initData.
+    assert client.get("/api/me", params={"tg_id": 1}).status_code == 405
+    assert client.post("/api/me", json={"init_data": "forged"}).status_code == 403
+
+
+def test_favorites_requires_init_data():
+    assert client.get("/api/favorites", params={"tg_id": 1}).status_code == 405
+    assert client.post("/api/favorites", json={"init_data": "forged"}).status_code == 403
+
+
+def test_team_contact_sanitized():
+    raw = make_init_data({"id": 600, "username": "x"})
+    client.post("/api/team/save", json={
+        "init_data": raw, "name": "XSS FC", "league": "ЛФЛ", "positions": ["Вратарь"],
+        "contact": 'https://t.me/x"><img src=x onerror=alert(1)>',
+    })
+    teams = client.get("/api/teams").json()
+    t = next(t for t in teams if t["tg_id"] == 600)
+    assert '"' not in t["contact"]
+    assert "<" not in t["contact"] and ">" not in t["contact"]
+
+
+def test_apply_to_missing_team_rejected():
+    raw = make_init_data({"id": 601, "username": "y"})
+    r = client.post("/api/team/apply", json={"init_data": raw, "team_tg_id": 7654321})
+    assert r.json()["ok"] is False
 
 
 async def _async_return(val):

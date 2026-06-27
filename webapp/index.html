@@ -309,7 +309,7 @@ async function loadCard() {
     return;
   }
   el.innerHTML = '<div class="loader"></div>';
-  const d = await api('/api/me?tg_id=' + userId);
+  const d = await apiPost('/api/me', {});
   _card = d.found ? d : null;
   if (!d.found) { renderCreate(el); return; }
   renderCard(d, el);
@@ -582,7 +582,7 @@ function renderAgentCard(a) {
         <div class="nm">${esc(a.name)} <span class="free"></span></div>
         <div class="meta">${esc(a.position)}${a.age ? ' · ' + a.age + ' лет' : ''}${gm ? ' · ' + gm : ''}</div>
       </div>
-      ${link ? `<a class="write" href="${link}" target="_blank" onclick="event.stopPropagation()">Написать</a>` : ''}
+      ${link ? `<a class="write" href="${esc(link)}" target="_blank" onclick="event.stopPropagation()">Написать</a>` : ''}
     </div>`;
 }
 
@@ -595,7 +595,7 @@ function showAgentDetail(tgId) {
   const link = contactLink(a.contact, a.name);
   if (link) {
     document.getElementById('agent-detail').insertAdjacentHTML('beforeend',
-      `<div class="card-actions"><a class="btn primary sm" href="${link}" target="_blank">💬 Написать</a></div>`);
+      `<div class="card-actions"><a class="btn primary sm" href="${esc(link)}" target="_blank">💬 Написать</a></div>`);
   }
 }
 
@@ -630,7 +630,7 @@ async function loadProfile() {
     return;
   }
 
-  const d = await api('/api/me?tg_id=' + userId);
+  const d = await apiPost('/api/me', {});
 
   cardEl.innerHTML = `
     <div style="display:flex;align-items:center;gap:14px">
@@ -769,7 +769,7 @@ function renderTeamCard(t) {
       ${(t.positions && t.positions.length) ? `<div class="meta" style="margin-top:8px;font-size:13px"><b>Ищут:</b> ${esc(t.positions.join(', '))}</div>` : ''}
       ${t.comment ? `<div class="meta" style="margin-top:4px;font-size:13px;color:var(--muted)">${esc(t.comment)}</div>` : ''}
       <div class="btn-row" style="margin-top:10px">
-        ${link ? `<a class="btn ghost sm" href="${link}" target="_blank">💬 Написать</a>` : ''}
+        ${link ? `<a class="btn ghost sm" href="${esc(link)}" target="_blank">💬 Написать</a>` : ''}
         ${mine ? '<span class="btn ghost sm" style="opacity:.5">Твоя команда</span>'
                : `<button class="btn primary sm" onclick="applyTeam(${t.tg_id})">📩 Подать заявку</button>`}
       </div>
@@ -784,7 +784,7 @@ async function applyTeam(teamTgId) {
 async function showMyTeam() {
   const el = document.getElementById('teams-content');
   el.innerHTML = '<div class="loader"></div>';
-  const t = userId ? await api('/api/team/me?tg_id=' + userId) : {found: false};
+  const t = userId ? await apiPost('/api/team/me', {}) : {found: false};
   _team = t.found ? t : null;
   if (!t.found) { showTeamForm(); return; }
   const meta = [t.league, (t.districts || []).join(', '), t.division].filter(Boolean).join(' · ');
@@ -912,7 +912,7 @@ document.querySelectorAll('.nav button').forEach(b => {
 
 function esc(s) {
   if (!s) return '';
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────

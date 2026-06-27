@@ -1,15 +1,43 @@
+import hmac
 import os
+import secrets
 import sqlite3
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, render_template_string, request, session, redirect, url_for, jsonify
+from werkzeug.security import check_password_hash
 
 app = Flask(__name__)
-app.secret_key = os.getenv("ADMIN_SECRET_KEY", "lfl-admin-secret-2024")
+# Never ship a predictable signing key. Use ADMIN_SECRET_KEY from env, otherwise a
+# random per-process key (sessions reset on restart — fine for an admin panel).
+app.secret_key = os.getenv("ADMIN_SECRET_KEY") or secrets.token_hex(32)
+app.config.update(
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.getenv("ADMIN_HTTPS", "").lower() in ("1", "true", "yes"),
+)
 
 DB_PATH  = os.getenv("DB_PATH",       os.path.join(os.path.dirname(__file__), "..", "lfl_bot.db"))
 LOG_PATH = os.getenv("BOT_LOG_PATH",  os.path.join(os.path.dirname(__file__), "..", "bot.log"))
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+# No default password. Prefer a werkzeug hash (ADMIN_PASSWORD_HASH); a plaintext
+# ADMIN_PASSWORD is compared in constant time. If neither is set, login is disabled.
+ADMIN_PASSWORD_HASH = os.getenv("ADMIN_PASSWORD_HASH", "")
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
+
+# In-memory brute-force lockout per IP.
+_login_fails: dict[str, list] = {}
+_LOGIN_MAX = 5
+_LOGIN_WINDOW = 300
+
+
+def _check_password(pw: str) -> bool:
+    if ADMIN_PASSWORD_HASH:
+        return check_password_hash(ADMIN_PASSWORD_HASH, pw or "")
+    if ADMIN_PASSWORD:
+        return hmac.compare_digest(pw or "", ADMIN_PASSWORD)
+    return False
 
 
 def login_required(f):
@@ -332,10 +360,20 @@ loadLogs();
 def login():
     error = None
     if request.method == "POST":
-        if request.form.get("password") == ADMIN_PASSWORD:
+        ip = request.remote_addr or "?"
+        now = time.time()
+        fails = [t for t in _login_fails.get(ip, []) if now - t < _LOGIN_WINDOW]
+        if len(fails) >= _LOGIN_MAX:
+            error = "Слишком много попыток. Подожди 5 минут."
+        elif _check_password(request.form.get("password", "")):
+            _login_fails.pop(ip, None)
+            session.permanent = True
             session["logged_in"] = True
             return redirect(url_for("dashboard"))
-        error = "Неверный пароль"
+        else:
+            fails.append(now)
+            _login_fails[ip] = fails
+            error = "Неверный пароль"
     return render_template_string(HTML, page="login", error=error)
 
 
@@ -354,7 +392,10 @@ def dashboard():
 @app.route("/messages")
 @login_required
 def messages():
-    limit = int(request.args.get("limit", 200))
+    try:
+        limit = min(int(request.args.get("limit", 200)), 1000)
+    except ValueError:
+        limit = 200
     return render_template_string(HTML, page="messages", messages=get_messages(limit))
 
 
@@ -367,10 +408,14 @@ def logs():
 @app.route("/api/logs")
 @login_required
 def api_logs():
-    lines = int(request.args.get("lines", 200))
+    try:
+        lines = min(int(request.args.get("lines", 200)), 2000)
+    except ValueError:
+        lines = 200
     return jsonify({"lines": get_logs(lines)})
 
 
 if __name__ == "__main__":
     port = int(os.getenv("ADMIN_PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=False)
+    host = os.getenv("ADMIN_HOST", "127.0.0.1")
+    app.run(host=host, port=port, debug=False)
