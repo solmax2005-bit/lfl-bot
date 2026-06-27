@@ -328,8 +328,25 @@ def test_card_photo_upload():
     r = client.post("/api/card/photo", json={"init_data": raw, "image": _png_b64()})
     body = r.json()
     assert body["ok"] is True
-    assert body["profile"]["photo"].startswith("/photos/400.jpg")
-    assert os.path.exists(os.path.join(api.PHOTOS_DIR, "400.jpg"))
+    photo = body["profile"]["photo"]
+    assert photo.startswith("/photos/400_") and photo.endswith(".jpg")
+    assert os.path.exists(os.path.join(api.PHOTOS_DIR, os.path.basename(photo)))
+
+
+def test_card_photo_name_is_unguessable_and_replaces_old():
+    raw = make_init_data({"id": 404, "username": "ph2"})
+    client.post("/api/card/save", json={
+        "init_data": raw, "name": "Z", "position": "Вратарь", "age": 25, "division": "ЛФЛ",
+    })
+    p1 = client.post("/api/card/photo", json={"init_data": raw, "image": _png_b64()}).json()["profile"]["photo"]
+    # the guessable /photos/404.jpg must NOT exist (can't enumerate by tg_id)
+    assert not os.path.exists(os.path.join(api.PHOTOS_DIR, "404.jpg"))
+    f1 = os.path.basename(p1)
+    p2 = client.post("/api/card/photo", json={"init_data": raw, "image": _png_b64()}).json()["profile"]["photo"]
+    f2 = os.path.basename(p2)
+    assert f1 != f2                                              # fresh random name each upload
+    assert not os.path.exists(os.path.join(api.PHOTOS_DIR, f1))  # old file removed
+    assert os.path.exists(os.path.join(api.PHOTOS_DIR, f2))
 
 
 def test_card_photo_rejects_non_image():
@@ -378,8 +395,9 @@ def test_team_photo_upload():
     r = client.post("/api/team/photo", json={"init_data": raw, "image": _png_b64()})
     body = r.json()
     assert body["ok"] is True
-    assert body["team"]["photo"].startswith("/photos/team_410.jpg")
-    assert os.path.exists(os.path.join(api.PHOTOS_DIR, "team_410.jpg"))
+    photo = body["team"]["photo"]
+    assert photo.startswith("/photos/team_410_") and photo.endswith(".jpg")
+    assert os.path.exists(os.path.join(api.PHOTOS_DIR, os.path.basename(photo)))
 
 
 def test_team_photo_requires_team():

@@ -7,6 +7,7 @@ from database.queries import (
     upsert_agent, get_agents_by_position, deactivate_agent,
     get_agent_by_tg_id, link_profile,
     upsert_team, get_teams, get_team_by_tg_id, deactivate_team,
+    prune_old_messages,
 )
 
 
@@ -151,3 +152,23 @@ async def test_deactivate_team():
     teams = await get_teams(DB_PATH, league=None, districts=[], positions=[])
     os.unlink(DB_PATH)
     assert all(t["tg_id"] != 7001 for t in teams)
+
+
+@pytest.mark.asyncio
+async def test_prune_old_messages():
+    DB_PATH = make_db_path()
+    await init_db(DB_PATH)
+    async with aiosqlite.connect(DB_PATH) as conn:
+        await conn.execute(
+            "INSERT INTO bot_messages (tg_id, text, created_at) VALUES (?, ?, datetime('now', '-40 days'))",
+            (1, "old"),
+        )
+        await conn.execute("INSERT INTO bot_messages (tg_id, text) VALUES (?, ?)", (2, "new"))
+        await conn.commit()
+    deleted = await prune_old_messages(DB_PATH, 30)
+    async with aiosqlite.connect(DB_PATH) as conn:
+        cur = await conn.execute("SELECT text FROM bot_messages")
+        rows = [r[0] for r in await cur.fetchall()]
+    os.unlink(DB_PATH)
+    assert deleted == 1
+    assert rows == ["new"]

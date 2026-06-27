@@ -7,6 +7,7 @@ import json
 import hmac
 import base64
 import hashlib
+import secrets
 import time
 import asyncio
 from urllib.parse import parse_qsl
@@ -383,16 +384,31 @@ def _save_square_image(image_b64: str, dest_path: str, size: int = 400) -> str |
     return None
 
 
+def _new_photo_name(old: str, prefix: str) -> str:
+    """Delete the previous photo file and return a fresh, unguessable filename.
+    The random suffix stops anyone downloading a photo by guessing /photos/<tg_id>.jpg."""
+    if old:
+        base = os.path.basename(old.split("?")[0])
+        if base:
+            try:
+                os.remove(os.path.join(PHOTOS_DIR, base))
+            except OSError:
+                pass
+    return f"{prefix}{secrets.token_hex(8)}.jpg"
+
+
 @app.post("/api/card/photo")
 async def card_photo(req: PhotoReq):
     user = verify_init_data(req.init_data)
     tg_id = user["tg_id"]
-    if not await get_agent_by_tg_id(DB_PATH, tg_id):
+    existing = await get_agent_by_tg_id(DB_PATH, tg_id)
+    if not existing:
         return {"ok": False, "error": "Сначала создай карточку"}
-    err = _save_square_image(req.image, os.path.join(PHOTOS_DIR, f"{tg_id}.jpg"))
+    fname = _new_photo_name(existing.get("photo", ""), f"{tg_id}_")
+    err = _save_square_image(req.image, os.path.join(PHOTOS_DIR, fname))
     if err:
         return {"ok": False, "error": err}
-    await save_card_photo(DB_PATH, tg_id, f"/photos/{tg_id}.jpg?t={int(time.time())}")
+    await save_card_photo(DB_PATH, tg_id, f"/photos/{fname}")
     return await _card_response(tg_id)
 
 
@@ -568,12 +584,14 @@ async def team_delete(req: InitReq):
 async def team_photo(req: PhotoReq):
     user = verify_init_data(req.init_data)
     tg_id = user["tg_id"]
-    if not await get_team_by_tg_id(DB_PATH, tg_id):
+    existing = await get_team_by_tg_id(DB_PATH, tg_id)
+    if not existing:
         return {"ok": False, "error": "Сначала зарегистрируй команду"}
-    err = _save_square_image(req.image, os.path.join(PHOTOS_DIR, f"team_{tg_id}.jpg"))
+    fname = _new_photo_name(existing.get("photo", ""), f"team_{tg_id}_")
+    err = _save_square_image(req.image, os.path.join(PHOTOS_DIR, fname))
     if err:
         return {"ok": False, "error": err}
-    await save_team_photo(DB_PATH, tg_id, f"/photos/team_{tg_id}.jpg?t={int(time.time())}")
+    await save_team_photo(DB_PATH, tg_id, f"/photos/{fname}")
     t = await get_team_by_tg_id(DB_PATH, tg_id)
     return {"ok": True, "team": _team_public(t)}
 

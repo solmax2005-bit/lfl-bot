@@ -200,10 +200,11 @@ async def _summarize_text(text: str, hint: str = "") -> str:
     """Summarize long text via Groq, or truncate as fallback."""
     if len(text) <= _MAX_TEXT_LEN:
         return text
-    import httpx as _httpx
     api_key = os.getenv("GROQ_API_KEY", "")
-    if not api_key:
+    # Sending user text to a third party (Groq) is opt-in; default = local truncation.
+    if not api_key or os.getenv("GROQ_SUMMARIZE_COMMENTS", "").lower() not in ("1", "true", "yes"):
         return text[:_MAX_TEXT_LEN]
+    import httpx as _httpx
     sys_msg = (
         "Сократи текст до 1-2 предложений, не более 150 символов. "
         "Сохрани суть. Отвечай только сокращённым текстом."

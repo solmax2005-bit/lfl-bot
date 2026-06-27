@@ -138,6 +138,14 @@ async def _log_all_messages(update, context):
 async def post_init(app):
     db_path = os.getenv("DB_PATH", "lfl_bot.db")
     await init_db(db_path)
+    # Privacy retention: drop logged user messages older than MSG_RETENTION_DAYS.
+    try:
+        from database.queries import prune_old_messages
+        deleted = await prune_old_messages(db_path, int(os.getenv("MSG_RETENTION_DAYS", "30")))
+        if deleted:
+            logging.info("pruned %d old bot_messages", deleted)
+    except Exception as e:
+        logging.warning("prune_old_messages failed: %s", e)
 
 
 def main() -> None:

@@ -40,6 +40,17 @@ async def get_messages(db_path: str, limit: int = 100) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+async def prune_old_messages(db_path: str, days: int = 30) -> int:
+    """Delete logged user messages older than `days` (privacy retention). Returns count."""
+    async with aiosqlite.connect(db_path) as conn:
+        cur = await conn.execute(
+            "DELETE FROM bot_messages WHERE created_at < datetime('now', ?)",
+            (f"-{int(days)} days",),
+        )
+        await conn.commit()
+        return cur.rowcount
+
+
 async def upsert_agent(
     db_path: str, tg_id: int, name: str, position: str,
     division: str, contact: str, comment: str, lfl_url: str = "",
