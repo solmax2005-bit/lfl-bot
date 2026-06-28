@@ -538,8 +538,10 @@ async def become_agent_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     if profile:
         # Called from card view — save/update full profile with active=1
+        # current_club is the raw scraped value, so gate on is_free_agent here;
+        # the stored current_team (else-branch) is already "" for free agents.
         if not profile.is_free_agent and is_restricted_team(profile.current_club):
-            await query.answer(RESTRICTED_FREE_AGENT_MSG, show_alert=True)
+            await context.bot.send_message(update.effective_chat.id, RESTRICTED_FREE_AGENT_MSG)
             await _notify_admin_steel_attempt(
                 context, profile.name, update.effective_user, profile.lfl_url,
             )
@@ -572,7 +574,7 @@ async def become_agent_callback(update: Update, context: ContextTypes.DEFAULT_TY
             await query.answer("Профиль не найден.", show_alert=True)
             return
         if is_restricted_team(agent.get("current_team")):
-            await query.answer(RESTRICTED_FREE_AGENT_MSG, show_alert=True)
+            await context.bot.send_message(update.effective_chat.id, RESTRICTED_FREE_AGENT_MSG)
             await _notify_admin_steel_attempt(
                 context, agent.get("name", ""), update.effective_user, agent.get("lfl_url", ""),
             )
