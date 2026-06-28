@@ -15,6 +15,7 @@ from scraper.models import PlayerProfile
 from card_generator.generator import draw_card
 from database.db import init_db
 from database.queries import get_agent_by_tg_id, upsert_agent, activate_agent, update_looking, save_photo, upsert_user, incr_stat
+from restrictions import is_restricted_team, RESTRICTED_FREE_AGENT_MSG
 
 AWAITING_EXTRA_URL = 10
 
@@ -508,6 +509,26 @@ def _profile_to_json(profile: PlayerProfile) -> str:
     }, ensure_ascii=False)
 
 
+async def _notify_admin_steel_attempt(context, name, user, lfl_url=""):
+    """Сообщить администратору, что игрок СТИЛ пытался стать свободным агентом."""
+    from handlers.admin import ADMIN_TG_ID
+    if not ADMIN_TG_ID:
+        return
+    contact = f"@{user.username}" if user.username else f"tg_id: {user.id}"
+    lines = [
+        "🚫 Игрок СТИЛ пытался стать свободным агентом",
+        "",
+        f"👤 {name or '—'}",
+        f"📱 {contact}",
+    ]
+    if lfl_url:
+        lines.append(f"🔗 {lfl_url}")
+    try:
+        await context.bot.send_message(ADMIN_TG_ID, "\n".join(lines))
+    except Exception:
+        pass
+
+
 async def become_agent_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
@@ -517,6 +538,12 @@ async def become_agent_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     if profile:
         # Called from card view — save/update full profile with active=1
+        if not profile.is_free_agent and is_restricted_team(profile.current_club):
+            await query.answer(RESTRICTED_FREE_AGENT_MSG, show_alert=True)
+            await _notify_admin_steel_attempt(
+                context, profile.name, update.effective_user, profile.lfl_url,
+            )
+            return
         contact = (
             f"@{update.effective_user.username}"
             if update.effective_user.username else str(tg_id)
@@ -543,6 +570,12 @@ async def become_agent_callback(update: Update, context: ContextTypes.DEFAULT_TY
         agent = await get_agent_by_tg_id(DB_PATH, tg_id)
         if not agent:
             await query.answer("Профиль не найден.", show_alert=True)
+            return
+        if is_restricted_team(agent.get("current_team")):
+            await query.answer(RESTRICTED_FREE_AGENT_MSG, show_alert=True)
+            await _notify_admin_steel_attempt(
+                context, agent.get("name", ""), update.effective_user, agent.get("lfl_url", ""),
+            )
             return
         await activate_agent(DB_PATH, tg_id)
         name = agent.get("name", "")
