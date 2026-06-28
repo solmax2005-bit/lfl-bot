@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import httpx
 
@@ -8,6 +9,12 @@ _DEFAULT_HEADERS = {
     "Accept-Language": "ru-RU,ru;q=0.9",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
+
+# Fetch strategies tried in order. Direct first (free, fast); the proxy is an
+# automatic fallback used only when direct fails. Switching happens per request
+# with no config changes or restarts: if direct breaks, every request falls to
+# the proxy on its own; when direct recovers, requests use it again.
+_FETCH_ORDER = ("direct", "proxy")
 
 
 async def _do_fetch(fetch_url: str, headers: dict, timeout: float, encoding: str | None, proxy: str | None = None) -> str:
@@ -19,37 +26,37 @@ async def _do_fetch(fetch_url: str, headers: dict, timeout: float, encoding: str
         return response.text
 
 
-async def fetch_html(url: str, timeout: float = 15.0, encoding: str | None = None) -> str:
+def _strategies() -> list[tuple[str, str | None]]:
+    """(name, proxy) attempts in fallback order; proxy is skipped if PROXY_URL is unset."""
     proxy_url = os.getenv("PROXY_URL", "")
-    scraperapi_key = os.getenv("SCRAPERAPI_KEY", "")
-    cf_worker = os.getenv("CF_WORKER_URL", "")
+    out: list[tuple[str, str | None]] = []
+    for name in _FETCH_ORDER:
+        if name == "direct":
+            out.append(("direct", None))
+        elif name == "proxy" and proxy_url:
+            out.append(("proxy", proxy_url))
+    return out
 
-    cf_secret = os.getenv("CF_WORKER_SECRET", "")
-    if cf_worker and cf_secret and "lfl.ru" in url:
-        from urllib.parse import quote
-        fetch_url = f"{cf_worker}?secret={cf_secret}&url={quote(url, safe='')}"
-        headers = {}
-        proxy = None
-    elif proxy_url:
-        fetch_url = url
-        headers = _DEFAULT_HEADERS
-        proxy = proxy_url
-    elif scraperapi_key:
-        fetch_url = (
-            f"https://api.scraperapi.com"
-            f"?api_key={scraperapi_key}&url={url}&country_code=ru&timeout=12000"
-        )
-        headers = {}
-        proxy = None
-    else:
-        fetch_url = url
-        headers = _DEFAULT_HEADERS
-        proxy = None
 
-    try:
-        return await asyncio.wait_for(
-            _do_fetch(fetch_url, headers, timeout, encoding, proxy),
-            timeout=timeout,
-        )
-    except asyncio.TimeoutError as exc:
-        raise httpx.TimeoutException(f"Timeout after {timeout}s") from exc
+async def fetch_html(url: str, timeout: float = 15.0, encoding: str | None = None) -> str:
+    last_exc: Exception | None = None
+    for name, proxy in _strategies():
+        try:
+            return await asyncio.wait_for(
+                _do_fetch(url, _DEFAULT_HEADERS, timeout, encoding, proxy),
+                timeout=timeout,
+            )
+        except Exception as exc:  # noqa: BLE001 — any failure falls through to the next strategy
+            last_exc = exc
+            logging.warning(
+                "fetch_html: strategy '%s' failed for %s: %s",
+                name, url, type(exc).__name__,
+            )
+            continue
+    # Every strategy failed. Preserve the timeout contract so callers (lfl.py)
+    # can show "lfl.ru не отвечает" when nothing answered in time.
+    if isinstance(last_exc, asyncio.TimeoutError):
+        raise httpx.TimeoutException(f"Timeout after {timeout}s") from last_exc
+    if last_exc is not None:
+        raise last_exc
+    raise httpx.HTTPError("No fetch strategy configured")
