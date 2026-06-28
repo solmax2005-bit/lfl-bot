@@ -33,9 +33,11 @@ from database.queries import (
     get_active_teams_for_notification, get_active_agents_for_notification,
     incr_stat,
 )
+from restrictions import is_restricted_team, RESTRICTED_FREE_AGENT_MSG
 
 DB_PATH = os.getenv("DB_PATH", "lfl_bot.db")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+ADMIN_TG_ID = int(os.getenv("ADMIN_TG_ID", "0") or 0)
 
 POSITIONS = {"Нападающий", "Полузащитник", "Защитник", "Вратарь"}
 LEAGUES = {"ЛФЛ", "AFL", "Pari Amateur", "F-лига", ""}
@@ -332,6 +334,14 @@ async def card_status(req: StatusReq, background: BackgroundTasks):
     if not existing:
         return {"ok": False, "error": "Сначала создай карточку"}
     was_active = existing.get("active", 0)
+    # Игроки ограниченных команд (СТИЛ) не могут попасть на доску свободных агентов.
+    if req.active == 1 and not was_active and is_restricted_team(existing.get("current_team")):
+        background.add_task(
+            _notify_admin_restricted,
+            existing.get("name", ""), user.get("username"), tg_id,
+            existing.get("lfl_url", ""),
+        )
+        return {"ok": False, "error": RESTRICTED_FREE_AGENT_MSG}
     if req.active is not None:
         if req.active:
             await activate_agent(DB_PATH, tg_id)
@@ -491,6 +501,22 @@ async def _notify_teams_new_player(agent_tg_id: int, agent_name: str, position: 
             reply_markup=kb,
         )
         await asyncio.sleep(0.05)
+
+
+async def _notify_admin_restricted(name: str, username: str | None, tg_id: int, lfl_url: str = "") -> None:
+    """Сообщить администратору, что игрок СТИЛ пытался стать свободным агентом."""
+    if not ADMIN_TG_ID:
+        return
+    contact = f"@{username}" if username else f"tg_id: {tg_id}"
+    lines = [
+        "🚫 Игрок СТИЛ пытался стать свободным агентом",
+        "",
+        f"👤 {name or '—'}",
+        f"📱 {contact}",
+    ]
+    if lfl_url:
+        lines.append(f"🔗 {lfl_url}")
+    await _send_telegram(ADMIN_TG_ID, "\n".join(lines))
 
 
 async def _notify_players_new_team(team_tg_id: int, team_name: str, league: str, positions: list) -> None:

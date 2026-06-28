@@ -457,3 +457,53 @@ def test_apply_to_missing_team_rejected():
 
 async def _async_return(val):
     return val
+
+
+def test_status_steel_player_blocked(monkeypatch):
+    notified = {}
+    teams = {"n": 0}
+
+    async def fake_admin(name, username, tg_id, lfl_url=""):
+        notified["args"] = (name, username, tg_id, lfl_url)
+
+    async def fake_teams(*a):
+        teams["n"] += 1
+
+    monkeypatch.setattr(api, "_notify_admin_restricted", fake_admin)
+    monkeypatch.setattr(api, "_notify_teams_new_player", fake_teams)
+    raw = make_init_data({"id": 500, "username": "steelguy"})
+    client.post("/api/card/save", json={
+        "init_data": raw, "name": "Семён Стилов", "position": "Защитник",
+        "age": 26, "division": "ЛФЛ", "current_team": "СТИЛ",
+    })
+    r = client.post("/api/card/status", json={"init_data": raw, "active": 1})
+    body = r.json()
+    assert body["ok"] is False
+    assert "СТИЛ" in body["error"]
+    # карточка НЕ активирована
+    me = client.post("/api/me", json={"init_data": raw}).json()
+    assert me["active"] == 0
+    # командам НЕ уведомили, администратору — уведомили
+    assert teams["n"] == 0
+    assert notified.get("args") is not None
+    assert notified["args"][2] == 500
+
+
+def test_status_non_steel_activates(monkeypatch):
+    async def fake_teams(*a):
+        pass
+
+    async def fake_admin(*a, **k):
+        raise AssertionError("admin must NOT be notified for a normal player")
+
+    monkeypatch.setattr(api, "_notify_teams_new_player", fake_teams)
+    monkeypatch.setattr(api, "_notify_admin_restricted", fake_admin)
+    raw = make_init_data({"id": 501, "username": "normal"})
+    client.post("/api/card/save", json={
+        "init_data": raw, "name": "Обычный", "position": "Нападающий",
+        "age": 24, "division": "ЛФЛ", "current_team": "Динамо",
+    })
+    r = client.post("/api/card/status", json={"init_data": raw, "active": 1})
+    body = r.json()
+    assert body["ok"] is True
+    assert body["profile"]["active"] == 1
