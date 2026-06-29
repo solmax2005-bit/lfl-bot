@@ -29,6 +29,7 @@ from telegram.ext import (
     CallbackQueryHandler, filters, ApplicationHandlerStop,
 )
 from telegram.request import HTTPXRequest
+from telegram.error import BadRequest
 
 # Outbound calls to api.telegram.org from the RU server intermittently fail to
 # establish a connection (DPI throttling of new TLS handshakes). getUpdates
@@ -148,6 +149,24 @@ async def post_init(app):
         logging.warning("prune_old_messages failed: %s", e)
 
 
+def _is_ignorable_telegram_error(err) -> bool:
+    """True for benign Telegram errors not worth logging as ERROR.
+
+    'Message is not modified' fires when a user re-taps a button that re-renders
+    identical content — harmless (the screen is already correct), but with no
+    error handler it spams tracebacks and the tap looks like it 'did nothing'.
+    """
+    return isinstance(err, BadRequest) and "message is not modified" in str(err).lower()
+
+
+async def error_handler(update, context) -> None:
+    """Global error handler: swallow benign errors, log the rest with traceback."""
+    err = context.error
+    if _is_ignorable_telegram_error(err):
+        return
+    logging.error("Unhandled error processing update: %s", err, exc_info=err)
+
+
 def main() -> None:
     token = os.environ["TELEGRAM_BOT_TOKEN"]
     # Lower connect_timeout so a stalled handshake fails fast and RetryRequest
@@ -163,6 +182,9 @@ def main() -> None:
         .post_init(post_init)
         .build()
     )
+
+    # Global error handler — swallow benign "Message is not modified", log the rest.
+    app.add_error_handler(error_handler)
 
     # Rate limit (group=-2 stops all further processing if triggered)
     app.add_handler(MessageHandler(filters.ALL, _rate_limit), group=-2)
