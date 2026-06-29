@@ -5,83 +5,76 @@ from bs4 import BeautifulSoup
 from scraper.models import PlayerProfile
 from scraper.http import fetch_html
 
+_RU_MONTHS = {
+    "января": 1, "февраля": 2, "марта": 3, "апреля": 4, "мая": 5, "июня": 6,
+    "июля": 7, "августа": 8, "сентября": 9, "октября": 10, "ноября": 11, "декабря": 12,
+}
 
-def _extract_age(birthdate_str: str) -> int:
+# Maps f-league summary labels (div.stats-info__text) to PlayerProfile fields.
+_STAT_LABELS = {
+    "Игры": "matches", "Голы": "goals", "Передачи": "assists",
+    "ЖК": "yellow_cards", "КК": "red_cards",
+}
+
+
+def _parse_ru_date(raw: str) -> tuple[str, int]:
+    """('02.02.1991', age) from '02 февраля 1991'; ('—', 0) if unparseable."""
+    m = re.search(r"(\d{1,2})\s+([а-яё]+)\s+(\d{4})", (raw or "").lower())
+    if not m:
+        return "—", 0
+    month = _RU_MONTHS.get(m.group(2))
+    if not month:
+        return "—", 0
     try:
-        day, month, year = birthdate_str.split(".")
-        born = date(int(year), int(month), int(day))
-        today = date.today()
-        return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
-    except Exception:
-        return 0
+        born = date(int(m.group(3)), month, int(m.group(1)))
+    except ValueError:
+        return "—", 0
+    today = date.today()
+    age = today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+    return born.strftime("%d.%m.%Y"), age
+
+
+def _promo_value(soup: BeautifulSoup, modifier: str) -> str:
+    """Text of .player-promo__value inside the li with the given --modifier."""
+    li = soup.find("li", class_=re.compile(rf"player-promo__item--{modifier}\b"))
+    if li:
+        value = li.find(class_="player-promo__value")
+        if value:
+            return value.get_text(" ", strip=True)
+    return ""
 
 
 def _parse_fleague_html(html: str, url: str) -> PlayerProfile:
     soup = BeautifulSoup(html, "html.parser")
 
-    h1 = soup.find("h1") or soup.find(class_=re.compile(r"player.?name|title", re.I))
-    name = h1.text.strip() if h1 else "Неизвестно"
+    name_el = soup.find(class_="player-promo__name-main") or soup.find(class_="player-promo__name")
+    name = name_el.get_text(" ", strip=True) if name_el else "Неизвестно"
 
-    POSITIONS_RE = re.compile(r"Нападающий|Полузащитник|Защитник|Вратарь", re.I)
-    pos_tag = soup.find(string=POSITIONS_RE)
-    if pos_tag:
-        position = str(pos_tag).strip()
-    else:
-        pos_block = soup.find(class_=re.compile(r"pos|role", re.I))
-        position = pos_block.text.strip() if pos_block else "—"
-
-    DATE_RE = re.compile(r"\d{2}\.\d{2}\.\d{4}")
-    birthdate = "—"
-    bd = soup.find(string=DATE_RE)
-    if bd:
-        m = DATE_RE.search(str(bd))
-        if m:
-            birthdate = m.group(0)
-    age = _extract_age(birthdate)
-
-    club_tag = (
-        soup.find(class_=re.compile(r"club|team", re.I))
-        or soup.find("a", href=re.compile(r"/club|/team", re.I))
-    )
-    current_club = club_tag.text.strip() if club_tag else "Свободный агент"
+    current_club = _promo_value(soup, "club") or "Свободный агент"
     is_free_agent = current_club in ("", "Свободный агент", "—")
 
-    goals = matches = assists = yellow_cards = red_cards = 0
-    debut_year = date.today().year
-    career_clubs: list[str] = []
+    birthdate, age = _parse_ru_date(_promo_value(soup, "birth"))
 
-    table = soup.find("table")
-    if table:
-        rows = table.find_all("tr")[1:]
-        years = []
-        for row in rows:
-            cols = [td.text.strip() for td in row.find_all("td")]
-            if len(cols) < 3:
-                continue
-            try:
-                year = int(cols[0]) if cols[0].isdigit() else 0
-                club = cols[1] if len(cols) > 1 else ""
-                m_val = int(cols[2]) if len(cols) > 2 and cols[2].isdigit() else 0
-                g_val = int(cols[3]) if len(cols) > 3 and cols[3].isdigit() else 0
-                a_val = int(cols[4]) if len(cols) > 4 and cols[4].isdigit() else 0
-            except (ValueError, IndexError):
-                continue
-            matches += m_val
-            goals += g_val
-            assists += a_val
-            if club and club not in career_clubs:
-                career_clubs.append(club)
-            if year:
-                years.append(year)
-        if years:
-            debut_year = min(years)
+    # Summary stats block (div.stats-info__text label + div.stats-info__number value).
+    stats = {"matches": 0, "goals": 0, "assists": 0, "yellow_cards": 0, "red_cards": 0}
+    container = soup.find(class_=re.compile(r"stats-info--player\b"))
+    if container:
+        for item in container.find_all(class_="stats-info__item"):
+            label = item.find(class_="stats-info__text")
+            number = item.find(class_="stats-info__number")
+            field = _STAT_LABELS.get(label.get_text(strip=True)) if label else None
+            if field and number:
+                value = number.get_text(strip=True)
+                stats[field] = int(value) if value.lstrip("-").isdigit() else 0
+
+    career_clubs = [current_club] if not is_free_agent else []
 
     return PlayerProfile(
-        name=name, position=position, birthdate=birthdate, age=age,
+        name=name, position="—", birthdate=birthdate, age=age,
         current_club=current_club, club_id=0, career_clubs=career_clubs,
-        goals=goals, matches=matches, assists=assists,
-        yellow_cards=0, red_cards=0,
-        debut_year=debut_year, lfl_url=url, is_free_agent=is_free_agent,
+        goals=stats["goals"], matches=stats["matches"], assists=stats["assists"],
+        yellow_cards=stats["yellow_cards"], red_cards=stats["red_cards"],
+        debut_year=date.today().year, lfl_url=url, is_free_agent=is_free_agent,
     )
 
 
@@ -90,4 +83,4 @@ async def parse_fleague_player(url: str) -> PlayerProfile:
         html = await fetch_html(url, timeout=20.0)
         return _parse_fleague_html(html, url)
     except httpx.HTTPError as exc:
-        raise ValueError(f"Не удалось загрузить профиль F-лиги: {exc}") from exc
+        raise ValueError(f"Не удалось загрузить профиль F-лиги: {type(exc).__name__}") from exc
