@@ -1,100 +1,116 @@
+"""Parser for afl.ru player pages.
+
+afl.ru is a client-only SPA with no server-rendered data, so scraping its HTML
+yields nothing. The data comes from the footballista REST API (afl.ru is part of
+footballista): GET /api/players/<id> for the profile and /api/players/<id>/stats
+for career totals + team history. We read those JSON endpoints directly.
+"""
+import asyncio
+import json
 import re
-from datetime import date
+from datetime import date, datetime
+
 import httpx
-from bs4 import BeautifulSoup
+
 from scraper.models import PlayerProfile
 from scraper.http import fetch_html
 
+_AFL_API = "https://footballista.ru/api/players/{pid}"
 
-def _extract_age(birthdate_str: str) -> int:
+# afl.ru position codes → the bot's four categories.
+_POSITION_MAP = {
+    "GK": "Вратарь",
+    "CB": "Защитник", "LB": "Защитник", "RB": "Защитник",
+    "LWB": "Защитник", "RWB": "Защитник", "SW": "Защитник", "DF": "Защитник",
+    "DM": "Полузащитник", "CM": "Полузащитник", "AM": "Полузащитник",
+    "LM": "Полузащитник", "RM": "Полузащитник", "MF": "Полузащитник",
+    "LW": "Нападающий", "RW": "Нападающий", "ST": "Нападающий",
+    "CF": "Нападающий", "SS": "Нападающий", "FW": "Нападающий",
+}
+
+
+def _afl_id(url: str) -> str | None:
+    """Player id = the trailing number of the slug (.../zverev-ivan-711043)."""
+    m = re.search(r"-(\d+)(?:[/?#]|$)", url)
+    return m.group(1) if m else None
+
+
+def _map_position(code: str) -> str:
+    return _POSITION_MAP.get((code or "").strip().upper(), "—")
+
+
+def _afl_age(iso: str) -> tuple[str, int]:
+    """('25.12.2001', age) from '2001-12-25T...'; ('—', 0) if unparseable."""
     try:
-        day, month, year = birthdate_str.split(".")
-        born = date(int(year), int(month), int(day))
-        today = date.today()
-        return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
-    except Exception:
-        return 0
+        d = datetime.strptime((iso or "")[:10], "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        return "—", 0
+    today = date.today()
+    age = today.year - d.year - ((today.month, today.day) < (d.month, d.day))
+    return d.strftime("%d.%m.%Y"), age
 
 
-def _parse_afl_html(html: str, url: str) -> PlayerProfile:
-    soup = BeautifulSoup(html, "html.parser")
+def _build_afl_profile(profile: dict, stats: dict, url: str) -> PlayerProfile:
+    name = " ".join(
+        x.strip() for x in (profile.get("lastName"), profile.get("firstName"), profile.get("middleName"))
+        if x and x.strip()
+    ) or "Неизвестно"
 
-    h1 = soup.find("h1")
-    name = h1.text.strip() if h1 else "Неизвестно"
+    birthdate, age = _afl_age(profile.get("birthdayDate"))
+    position = _map_position(profile.get("position"))
 
-    POSITIONS_RE = re.compile(r"Нападающий|Полузащитник|Защитник|Вратарь", re.I)
-    pos_tag = (
-        soup.find(class_=re.compile(r"position|player-pos", re.I))
-        or soup.find(string=POSITIONS_RE)
-    )
-    if hasattr(pos_tag, "text"):
-        position = pos_tag.text.strip()
-    elif pos_tag:
-        position = str(pos_tag).strip()
-    else:
-        position = "—"
+    teams = (stats or {}).get("teams") or []
+    # Current club = an active registration (till is null), the most recently joined.
+    active = [t for t in teams if not t.get("till")]
+    current = max(active or teams, key=lambda t: t.get("from") or "", default=None)
+    current_club = ((current or {}).get("team") or {}).get("name", "").strip() if current else ""
+    is_free_agent = not current_club
 
-    DATE_RE = re.compile(r"\d{2}\.\d{2}\.\d{4}")
-    bd_tag = soup.find(class_=re.compile(r"birth|dob", re.I)) or soup.find(
-        string=DATE_RE
-    )
-    birthdate = "—"
-    if bd_tag:
-        m = DATE_RE.search(getattr(bd_tag, "text", str(bd_tag)))
-        if m:
-            birthdate = m.group(0)
-    age = _extract_age(birthdate)
-
-    club_tag = soup.find(class_=re.compile(r"club|team", re.I))
-    current_club = club_tag.text.strip() if club_tag else "Свободный агент"
-    is_free_agent = current_club in ("", "Свободный агент", "—")
-
-    goals = matches = assists = yellow_cards = red_cards = 0
-    debut_year = date.today().year
+    # Career clubs: most recent first, current pinned to the front.
     career_clubs: list[str] = []
+    for t in sorted(teams, key=lambda t: t.get("from") or "", reverse=True):
+        nm = ((t.get("team") or {}).get("name") or "").strip()
+        if nm and nm not in career_clubs:
+            career_clubs.append(nm)
+    if current_club and current_club in career_clubs:
+        career_clubs.remove(current_club)
+        career_clubs.insert(0, current_club)
 
-    table = soup.find("table")
-    if table:
-        rows = table.find_all("tr")[1:]
-        years = []
-        for row in rows:
-            cols = [td.text.strip() for td in row.find_all("td")]
-            if len(cols) < 3:
-                continue
-            try:
-                year = int(cols[0]) if cols[0].isdigit() else 0
-                club = cols[1] if len(cols) > 1 else ""
-                m_val = int(cols[2]) if len(cols) > 2 and cols[2].isdigit() else 0
-                g_val = int(cols[3]) if len(cols) > 3 and cols[3].isdigit() else 0
-                a_val = int(cols[4]) if len(cols) > 4 and cols[4].isdigit() else 0
-                yk_val = int(cols[5]) if len(cols) > 5 and cols[5].isdigit() else 0
-                rk_val = int(cols[6]) if len(cols) > 6 and cols[6].isdigit() else 0
-            except (ValueError, IndexError):
-                continue
-            matches += m_val
-            goals += g_val
-            assists += a_val
-            yellow_cards += yk_val
-            red_cards += rk_val
-            if club and club not in career_clubs:
-                career_clubs.append(club)
-            if year:
-                years.append(year)
-        if years:
-            debut_year = min(years)
+    years = [int((t.get("from") or "")[:4]) for t in teams if (t.get("from") or "")[:4].isdigit()]
+    debut_year = min(years) if years else date.today().year
 
     return PlayerProfile(
         name=name, position=position, birthdate=birthdate, age=age,
-        current_club=current_club, club_id=0, career_clubs=career_clubs,
-        goals=goals, matches=matches, assists=assists,
-        yellow_cards=yellow_cards, red_cards=red_cards,
+        current_club=current_club or "Свободный агент", club_id=0,
+        career_clubs=career_clubs,
+        goals=int((stats or {}).get("goals") or 0),
+        matches=int((stats or {}).get("played") or 0),
+        assists=int((stats or {}).get("assists") or 0),
+        # afl.ru's stats summary has no card totals.
+        yellow_cards=0, red_cards=0,
         debut_year=debut_year, lfl_url=url, is_free_agent=is_free_agent,
     )
 
 
 async def parse_afl_player(url: str) -> PlayerProfile:
+    pid = _afl_id(url)
+    if not pid:
+        raise ValueError("AFL: не удалось определить id игрока в ссылке")
+    base = _AFL_API.format(pid=pid)
     try:
-        html = await fetch_html(url, timeout=20.0)
-        return _parse_afl_html(html, url)
+        profile_raw, stats_raw = await asyncio.gather(
+            fetch_html(base, timeout=20.0),
+            fetch_html(base + "/stats", timeout=20.0),
+            return_exceptions=True,
+        )
+        if isinstance(profile_raw, Exception):
+            raise profile_raw
+        profile = json.loads(profile_raw)
+        stats = json.loads(stats_raw) if isinstance(stats_raw, str) else {}
+        return _build_afl_profile(profile, stats, url)
     except httpx.HTTPError as exc:
-        raise ValueError(f"Не удалось загрузить профиль AFL: {exc}") from exc
+        raise ValueError(f"Не удалось загрузить профиль AFL: {type(exc).__name__}") from exc
+    except ValueError:
+        raise
+    except Exception as exc:
+        raise ValueError(f"Ошибка парсера AFL: {type(exc).__name__}: {exc}") from exc
