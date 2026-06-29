@@ -51,9 +51,13 @@ def test_current_club_is_latest_registration():
     assert "HOOKAH BAR" in p.career_clubs
 
 
-def test_no_stats_in_page_format():
+def test_career_stats_from_person_stats():
+    # Totals come straight from props.pageProps.person.stats — matching the site.
     p = _parse_lfl_page_html(_fixture_html(), URL)
-    assert (p.goals, p.matches, p.assists, p.yellow_cards, p.red_cards) == (0, 0, 0, 0, 0)
+    assert p.matches == 88
+    assert p.goals == 96
+    assert p.assists == 43
+    assert p.yellow_cards + p.red_cards == 7   # site shows "Наказания: 7"
 
 
 @pytest.mark.asyncio
@@ -68,58 +72,4 @@ async def test_detect_and_parse_routes_to_page_parser(monkeypatch):
     assert p is not None
     assert p.name == "Мустафаев Эмиль Теймурович"
     assert p.current_club == "СТИЛ"
-
-
-# ── stats from api.lfl.ru ─────────────────────────────────────────────────────
-
-TOUR_FIXTURES = {
-    231918: Path(__file__).parent / "fixtures" / "lfl_page_tour_231918.json",
-    260735: Path(__file__).parent / "fixtures" / "lfl_page_tour_260735.json",
-    283623: Path(__file__).parent / "fixtures" / "lfl_page_tour_283623.json",
-}
-
-
-def test_player_ids_from_page_props():
-    pp = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    assert lfl_page._player_ids(pp) == [231918, 260735, 283623]
-
-
-def test_sum_stats_across_registrations():
-    payloads = [json.loads(p.read_text(encoding="utf-8")) for p in TOUR_FIXTURES.values()]
-    matches, goals, assists, yc, rc = lfl_page._sum_stats(payloads)
-    assert (matches, goals, assists) == (15, 16, 9)   # summed across all registrations
-    assert (yc, rc) == (0, 0)
-
-
-@pytest.mark.asyncio
-async def test_parse_player_aggregates_stats(monkeypatch):
-    page_html = _fixture_html()
-
-    async def fake_fetch(url, timeout=15.0, encoding=None):
-        if url.startswith("https://page.lfl.ru/persons/"):
-            return page_html
-        for pid, path in TOUR_FIXTURES.items():
-            if f"/persons/{pid}/tournaments" in url:
-                return path.read_text(encoding="utf-8")
-        raise AssertionError(f"unexpected fetch: {url}")
-
-    monkeypatch.setattr(lfl_page, "fetch_html", fake_fetch)
-    p = await lfl_page.parse_lfl_page_player(URL)
-    assert p.current_club == "СТИЛ"
-    assert (p.matches, p.goals, p.assists) == (15, 16, 9)
-
-
-@pytest.mark.asyncio
-async def test_stats_failure_does_not_break_card(monkeypatch):
-    # api.lfl.ru down → card still builds with zero stats (best-effort).
-    page_html = _fixture_html()
-
-    async def fake_fetch(url, timeout=15.0, encoding=None):
-        if url.startswith("https://page.lfl.ru/persons/"):
-            return page_html
-        raise RuntimeError("api.lfl.ru unreachable")
-
-    monkeypatch.setattr(lfl_page, "fetch_html", fake_fetch)
-    p = await lfl_page.parse_lfl_page_player(URL)
-    assert p.name == "Мустафаев Эмиль Теймурович"
-    assert (p.matches, p.goals, p.assists) == (0, 0, 0)
+    assert (p.matches, p.goals, p.assists) == (88, 96, 43)
