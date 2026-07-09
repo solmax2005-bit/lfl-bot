@@ -1,10 +1,10 @@
 import re
 from scraper.models import PlayerProfile
 
-LFL_PAGE_RE = re.compile(r"https?://page\.lfl\.ru/persons/\d+[^\s]*", re.I)
-LFL_RE = re.compile(r"https?://lfl\.ru/person\d+[^\s]*", re.I)
-AFL_RE = re.compile(r"https?://afl\.ru/players/[\w-]+-\d+[^\s]*", re.I)
-FLEAGUE_RE = re.compile(r"https?://f-league\.ru/player/\d+[^\s]*", re.I)
+LFL_PAGE_RE = re.compile(r"https?://(?:www\.)?page\.lfl\.ru/persons/\d+[^\s]*", re.I)
+LFL_RE = re.compile(r"https?://(?:www\.)?lfl\.ru/person\d+[^\s]*", re.I)
+AFL_RE = re.compile(r"https?://(?:www\.)?afl\.ru/players/[\w-]+-\d+[^\s]*", re.I)
+FLEAGUE_RE = re.compile(r"https?://(?:www\.)?f-league\.ru/player/\d+[^\s]*", re.I)
 
 
 def detect_url(text: str) -> tuple[str, str] | None:
